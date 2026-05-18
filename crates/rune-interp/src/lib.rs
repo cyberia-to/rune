@@ -201,9 +201,16 @@ pub fn eval(subject: &Noun, formula: &Noun) -> Result<Noun, InterpError> {
                     continue; // tail-call: eval body against current subject
                 }
 
-                // 17 — look: stub for graph scry (M2)
+                // 17 — look: graph scry
+                // rest = [path_formula world_formula]
+                //   path_formula  — formula for the address/key (atom hash)
+                //   world_formula — formula to get the world noun from subject
+                // Searches world for a [key value] pair; returns value or Atom(0).
                 Noun::Atom(17) => {
-                    return Ok(Noun::Atom(0));
+                    let (path_form, world_form) = pair(rest)?;
+                    let path  = eval(&subj, &path_form)?;
+                    let world = eval(&subj, &world_form)?;
+                    return Ok(scry_world(&path, &world));
                 }
 
                 _ => return Err(err(&format!("nox: unrecognized opcode {:?}", op))),
@@ -237,6 +244,21 @@ pub fn axis(noun: &Noun, addr: u64) -> Result<Noun, InterpError> {
         n => {
             let parent = axis(noun, n / 2)?;
             axis(&parent, 2 + (n % 2))
+        }
+    }
+}
+
+/// Search a world noun (right-nested list of [key value] pairs) for a matching key.
+/// World structure: `[[key1 val1] [[key2 val2] ...]]` or Atom(0) for empty.
+/// Returns the value if found, Atom(0) otherwise.
+fn scry_world(path: &Noun, world: &Noun) -> Noun {
+    match world {
+        Noun::Atom(_) => Noun::Atom(0),
+        Noun::Cell(entry, rest) => {
+            match entry.as_ref() {
+                Noun::Cell(key, val) if key.as_ref() == path => *val.clone(),
+                _ => scry_world(path, rest),
+            }
         }
     }
 }
@@ -700,11 +722,29 @@ mod tests {
         assert_eq!(eval(&a(0), &formula).unwrap(), a(0));
     }
 
-    // ── pattern 17: look stub ─────────────────────────────────────────────────
+    // ── pattern 17: look (scry) ───────────────────────────────────────────────
 
     #[test]
     fn look_stub_returns_zero() {
-        let formula = c(a(17), c(a(1), a(0)));
+        // [17 [1 42] [1 0]] — path=42, world=Atom(0) (empty) → Atom(0)
+        let formula = c(a(17), c(c(a(1), a(42)), c(a(1), a(0))));
+        assert_eq!(eval(&a(0), &formula).unwrap(), a(0));
+    }
+
+    #[test]
+    fn look_finds_entry_in_world() {
+        // world = [[42 99] 0]  (one [key value] pair, nil-terminated)
+        // [17 [1 42] [1 [[42 99] 0]]] — path=42, world contains key=42→val=99
+        let world = c(c(a(42), a(99)), a(0));
+        let formula = c(a(17), c(c(a(1), a(42)), c(a(1), world)));
+        assert_eq!(eval(&a(0), &formula).unwrap(), a(99));
+    }
+
+    #[test]
+    fn look_misses_entry_returns_zero() {
+        // world has key=42→99, but we look for key=7
+        let world = c(c(a(42), a(99)), a(0));
+        let formula = c(a(17), c(c(a(1), a(7)), c(a(1), world)));
         assert_eq!(eval(&a(0), &formula).unwrap(), a(0));
     }
 
