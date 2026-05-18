@@ -8,5 +8,6 @@ description = "rune pure register parser — sigil syntax (Hoon-like digraphs)"
 path = "src/lib.rs"
 
 [dependencies]
-rune-ast = { workspace = true }
-rune-lex = { workspace = true }
+rune-ast     = { workspace = true }
+rune-lex     = { workspace = true }
+cyber-hemera = { workspace = true }

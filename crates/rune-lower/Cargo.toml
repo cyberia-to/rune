@@ -8,7 +8,8 @@ description = "rune lowering — AST to Nox noun (formula)"
 path = "src/lib.rs"
 
 [dependencies]
-rune-ast = { workspace = true }
+rune-ast     = { workspace = true }
+cyber-hemera = { workspace = true }
 
 [dev-dependencies]
 rune-interp = { workspace = true }

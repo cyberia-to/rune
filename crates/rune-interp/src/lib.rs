@@ -36,6 +36,7 @@
 /// [result_f1, result_f2].  This is the "auto-cons" / distribute pattern.
 
 use rune_ast::Noun;
+use cyber_hemera as hemera;
 
 /// Goldilocks prime: 2^64 - 2^32 + 1
 const GOLDILOCKS_PRIME: u64 = 0xFFFF_FFFF_0000_0001u64;
@@ -183,10 +184,13 @@ pub fn eval(subject: &Noun, formula: &Noun) -> Result<Noun, InterpError> {
                     return Ok(Noun::Atom(va << (vn & 63)));
                 }
 
-                // 15 — hash: stub; real hemera hash lands in M2
+                // 15 — hash: Poseidon2 (hemera) over canonical noun bytes
+                // Atom(n)  → hash(n.to_le_bytes())
+                // Cell(h,t) → hash(hash(h) ++ hash(t))  (Merkle-style)
+                // Result truncated to u64 via first 8 bytes (little-endian).
                 Noun::Atom(15) => {
                     let r = eval(&subj, rest)?;
-                    return Ok(r);
+                    return Ok(Noun::Atom(hash_noun(&r)));
                 }
 
                 // 16 — call/hint: evaluate body (tag/selector are reactive metadata, ignored at M5)
@@ -305,6 +309,32 @@ fn inv_field(a: u64) -> u64 {
         e >>= 1;
     }
     result as u64
+}
+
+/// Recursively hash a noun using Poseidon2 (hemera).
+///
+/// Atom(n)   → hemera::hash(&n.to_le_bytes())
+/// Cell(h,t) → hemera::hash(hash(h) ++ hash(t))
+///
+/// The 32-byte digest is truncated to u64 by reading the first 8 bytes
+/// as a little-endian integer.
+fn hash_noun(noun: &Noun) -> u64 {
+    let digest = hash_noun_bytes(noun);
+    u64::from_le_bytes(digest[..8].try_into().unwrap())
+}
+
+fn hash_noun_bytes(noun: &Noun) -> [u8; 32] {
+    match noun {
+        Noun::Atom(n) => *hemera::hash(&n.to_le_bytes()).as_bytes(),
+        Noun::Cell(h, t) => {
+            let hh = hash_noun_bytes(h);
+            let ht = hash_noun_bytes(t);
+            let mut buf = [0u8; 64];
+            buf[..32].copy_from_slice(&hh);
+            buf[32..].copy_from_slice(&ht);
+            *hemera::hash(&buf).as_bytes()
+        }
+    }
 }
 
 fn err(msg: &str) -> InterpError {
@@ -593,12 +623,49 @@ mod tests {
         assert_eq!(eval(&a(0), &formula).unwrap(), a(8));
     }
 
-    // ── pattern 15: hash stub ─────────────────────────────────────────────────
+    // ── pattern 15: hash (hemera Poseidon2) ──────────────────────────────────
 
     #[test]
-    fn hash_stub_returns_value() {
+    fn hash_atom_returns_atom() {
+        // [15 [1 55]] evaluates to some atom (u64 truncation of Poseidon2 digest)
         let formula = c(a(15), c(a(1), a(55)));
-        assert_eq!(eval(&a(0), &formula).unwrap(), a(55));
+        let result = eval(&a(0), &formula).unwrap();
+        assert!(matches!(result, Noun::Atom(_)));
+    }
+
+    #[test]
+    fn hash_atom_is_deterministic() {
+        let formula = c(a(15), c(a(1), a(42)));
+        let r1 = eval(&a(0), &formula).unwrap();
+        let r2 = eval(&a(0), &formula).unwrap();
+        assert_eq!(r1, r2);
+    }
+
+    #[test]
+    fn hash_atom_differs_by_value() {
+        let f1 = c(a(15), c(a(1), a(1)));
+        let f2 = c(a(15), c(a(1), a(2)));
+        let r1 = eval(&a(0), &f1).unwrap();
+        let r2 = eval(&a(0), &f2).unwrap();
+        assert_ne!(r1, r2);
+    }
+
+    #[test]
+    fn hash_cell_returns_atom() {
+        // [15 [3 [1 1] [1 2]]] → hash the cell [1 2]
+        let formula = c(a(15), c(a(3), c(c(a(1), a(1)), c(a(1), a(2)))));
+        let result = eval(&a(0), &formula).unwrap();
+        assert!(matches!(result, Noun::Atom(_)));
+    }
+
+    #[test]
+    fn hash_cell_differs_from_atom() {
+        // hash([1 2]) ≠ hash(1)
+        let atom_f = c(a(15), c(a(1), a(1)));
+        let cell_f = c(a(15), c(a(3), c(c(a(1), a(1)), c(a(1), a(2)))));
+        let ra = eval(&a(0), &atom_f).unwrap();
+        let rc = eval(&a(0), &cell_f).unwrap();
+        assert_ne!(ra, rc);
     }
 
     // ── pattern 16: hint/call ─────────────────────────────────────────────────

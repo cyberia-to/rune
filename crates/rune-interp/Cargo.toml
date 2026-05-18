@@ -8,7 +8,8 @@ description = "rune interpreter — tree-walking Nox evaluator; instant start by
 path = "src/lib.rs"
 
 [dependencies]
-rune-ast = { workspace = true }
+rune-ast     = { workspace = true }
+cyber-hemera = { workspace = true }
 
 [dev-dependencies]
 rune-parse   = { workspace = true }

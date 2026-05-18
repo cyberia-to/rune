@@ -8,6 +8,7 @@
 ///   `format_expr(expr) -> String`            — pretty-print in pure-register style
 use rune_ast::{Address, Expr};
 use rune_lex::{Lexer, Span, Spanned, Token};
+use cyber_hemera as hemera;
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -588,7 +589,8 @@ impl Parser {
 // ---------------------------------------------------------------------------
 
 fn string_to_atom(s: &str) -> u64 {
-    s.bytes().fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64))
+    let digest = hemera::hash(s.as_bytes());
+    u64::from_le_bytes(digest.as_bytes()[..8].try_into().unwrap())
 }
 
 // ---------------------------------------------------------------------------

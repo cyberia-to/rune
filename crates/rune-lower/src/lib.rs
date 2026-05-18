@@ -25,6 +25,7 @@
 ///   ~self  = 2   ~now   = 6    ~here  = 14   ~caps  = 30
 ///   ~code  = 62  ~libs  = 126  ~mem   = 254  ~world = 255
 use rune_ast::{Address, Expr, Noun};
+use cyber_hemera as hemera;
 
 #[derive(Debug)]
 pub struct LowerError {
@@ -654,10 +655,12 @@ fn lower_err(msg: impl Into<String>) -> LowerError {
 }
 
 // ---------------------------------------------------------------------------
-// Minimal name→atom encoding (placeholder until hemera lands in M2)
+// Name→atom encoding via Poseidon2 (hemera).
+// Takes the first 8 bytes of the 32-byte digest as a little-endian u64.
 // ---------------------------------------------------------------------------
 fn string_to_atom(s: &str) -> u64 {
-    s.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64))
+    let digest = hemera::hash(s.as_bytes());
+    u64::from_le_bytes(digest.as_bytes()[..8].try_into().unwrap())
 }
 
 // ---------------------------------------------------------------------------

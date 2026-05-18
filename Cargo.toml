@@ -29,7 +29,9 @@ rune-subject    = { path = "crates/rune-subject" }
 rune-mold       = { path = "crates/rune-mold" }
 rune-compile    = { path = "crates/rune-compile" }
 
+# stack deps
+cyber-hemera = { path = "../hemera/rs" }
+
 # stack deps — added when compile path lands (M6)
 # nox   = { path = "../nox/rs" }
 # nebu  = { package = "cyb-nebu", path = "../strata/nebu/rs" }
-# hemera = { path = "../hemera/rs" }

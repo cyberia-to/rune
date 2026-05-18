@@ -3,6 +3,7 @@
 /// Pure register parser (`rune` sigil syntax) lands in M4.
 use rune_ast::{Address, Expr};
 use rune_lex::{Lexer, Span, Spanned, Token};
+use cyber_hemera as hemera;
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -469,9 +470,10 @@ pub fn parse(src: &str) -> Result<Expr, ParseError> {
     Parser::new(tokens).parse_program()
 }
 
-/// Minimal name→atom encoding (matching rune-lower's stub).
+/// Name→atom encoding via Poseidon2 (hemera), matching rune-lower.
 fn string_to_atom(s: &str) -> u64 {
-    s.bytes().fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64))
+    let digest = hemera::hash(s.as_bytes());
+    u64::from_le_bytes(digest.as_bytes()[..8].try_into().unwrap())
 }
 
 /// Pretty-print an Expr back to classic (rust-style) register syntax.
