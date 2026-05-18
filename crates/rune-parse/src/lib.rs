@@ -35,6 +35,7 @@ impl Parser {
             Token::If     => self.parse_if(),
             Token::Loop   => self.parse_loop(),
             Token::Return => self.parse_return(),
+            Token::Impl   => self.parse_impl_block(),
             Token::LBrace => self.parse_block(),
             Token::LBrack => self.parse_cell_literal(),
             Token::Hash   => self.parse_address_particle(),
@@ -43,6 +44,7 @@ impl Parser {
             Token::Ket    => self.parse_address_abstract(),
             Token::Ident(ref s) if s == "match" => self.parse_match(),
             Token::Ident(ref s) if s == "continue" => { self.advance(); Ok(Expr::Loop) }
+            Token::Ident(ref s) if s == "rebind" => self.parse_rebind(),
             _             => self.parse_binop(0),
         }
     }
@@ -243,6 +245,64 @@ impl Parser {
         self.parse_expr()
     }
 
+    fn parse_impl_block(&mut self) -> Result<Expr, ParseError> {
+        self.expect(Token::Impl)?;
+        self.expect(Token::LBrace)?;
+        self.skip_newlines();
+        let mut arms = Vec::new();
+        while !matches!(self.peek(), Token::RBrace | Token::Eof) {
+            let arm = self.parse_impl_arm()?;
+            arms.push(arm);
+            self.skip_semi_or_newline();
+            self.skip_newlines();
+        }
+        self.expect(Token::RBrace)?;
+        Ok(Expr::Door(arms))
+    }
+
+    fn parse_impl_arm(&mut self) -> Result<Expr, ParseError> {
+        self.expect(Token::Fn)?;
+        let name = self.expect_ident()?;
+        self.expect(Token::LParen)?;
+        // skip "self" parameter if present
+        if let Token::Ident(ref s) = self.peek().clone() {
+            if s == "self" {
+                self.advance();
+                if matches!(self.peek(), Token::Comma) { self.advance(); }
+            }
+        }
+        // parse remaining params (may be empty)
+        let sample = if matches!(self.peek(), Token::RParen) {
+            Expr::Atom(0)
+        } else {
+            self.parse_param_list()?
+        };
+        self.expect(Token::RParen)?;
+        // optional return type annotation after `->`
+        if matches!(self.peek(), Token::Arrow) {
+            self.advance();
+            self.parse_mold_expr()?;
+        }
+        let body = self.parse_block()?;
+        // Arm body is a gate (if has params) or plain body
+        let arm_body = if matches!(sample, Expr::Atom(0)) {
+            body
+        } else {
+            Expr::Gate { sample: Box::new(sample), body: Box::new(body) }
+        };
+        Ok(Expr::Arm { name, body: Box::new(arm_body) })
+    }
+
+    fn parse_rebind(&mut self) -> Result<Expr, ParseError> {
+        self.advance(); // consume "rebind"
+        let slot = self.expect_ident()?;
+        self.expect(Token::Tis)?; // consume `=`
+        let value = self.parse_expr()?;
+        self.skip_semi_or_newline();
+        let body = self.parse_expr()?;
+        Ok(Expr::Rebind { slot, value: Box::new(value), body: Box::new(body) })
+    }
+
     /// Parse a `{ stmt; stmt; final_expr }` block.
     /// Multiple statements produce nested Let { name: "_", ... } bindings.
     fn parse_block(&mut self) -> Result<Expr, ParseError> {
@@ -440,6 +500,16 @@ pub fn format_expr(expr: &rune_ast::Expr) -> String {
             format!("match {} {{ {} }}", format_expr(subject), arms_str.join(", "))
         }
         Expr::Loop => "$".to_string(),
+        Expr::Door(arms) => {
+            let arms_str: Vec<String> = arms.iter().map(format_expr).collect();
+            format!("impl {{ {} }}", arms_str.join(" "))
+        }
+        Expr::Arm { name, body } => {
+            format!("fn {}() {{ {} }}", name, format_expr(body))
+        }
+        Expr::Rebind { slot, value, body } => {
+            format!("rebind {} = {};\n{}", slot, format_expr(value), format_expr(body))
+        }
         _ => format!("{expr:?}"),
     }
 }
@@ -575,6 +645,50 @@ mod tests {
     fn parse_continue_in_loop_body() {
         // loop { if x == 0 { continue } else { x } }
         let e = parse("loop { if x == 0 { continue } else { x } }").unwrap();
+        assert!(matches!(e, Expr::Trap(_)));
+    }
+
+    #[test]
+    fn parse_impl_block() {
+        let e = parse("impl { fn identity(self) { ~self } fn double(self, x: @nebu) { x * 2 } }").unwrap();
+        match e {
+            Expr::Door(arms) => {
+                assert_eq!(arms.len(), 2);
+                match &arms[0] {
+                    Expr::Arm { name, .. } => assert_eq!(name, "identity"),
+                    _ => panic!("expected Arm"),
+                }
+                match &arms[1] {
+                    Expr::Arm { name, .. } => assert_eq!(name, "double"),
+                    _ => panic!("expected Arm"),
+                }
+            }
+            _ => panic!("expected Door"),
+        }
+    }
+
+    #[test]
+    fn parse_impl_no_params() {
+        let e = parse("impl { fn get(self) { 42 } }").unwrap();
+        assert!(matches!(e, Expr::Door(_)));
+    }
+
+    #[test]
+    fn parse_rebind() {
+        let e = parse("rebind x = 10; x").unwrap();
+        match e {
+            Expr::Rebind { slot, value, body } => {
+                assert_eq!(slot, "x");
+                assert!(matches!(*value, Expr::Atom(10)));
+                assert!(matches!(*body, Expr::Sym(_)));
+            }
+            _ => panic!("expected Rebind"),
+        }
+    }
+
+    #[test]
+    fn parse_rebind_in_loop() {
+        let e = parse("loop { rebind x = x + 1; continue }").unwrap();
         assert!(matches!(e, Expr::Trap(_)));
     }
 }

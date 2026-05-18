@@ -60,10 +60,13 @@ struct Env {
     stack: Vec<String>,
     /// Known gate definitions, for inlining at call sites.
     gates: Vec<GateDef>,
+    /// True when compiling inside a Trap body (enables Loop/recur).
+    in_trap: bool,
 }
 
 impl Env {
     /// Return a new Env with `name` pushed to the front (depth 0).
+    /// `in_trap` is preserved by clone, so trap context propagates into nested exprs.
     fn push(&self, name: &str) -> Self {
         let mut e = self.clone();
         e.stack.insert(0, name.to_string());
@@ -412,17 +415,45 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         }
 
         // ------------------------------------------------------------------
-        // Trap — execute body once.
-        // Full tail-recursive recur ($ syntax) is not yet implemented.
+        // Trap — self-referential loop body with tail-call recur.
+        //
+        // Push "$" so all outer vars shift by 1 (axis-shift matches cons-shift).
+        // Set in_trap = true so nested Loop nodes know they are in a trap.
+        //
+        // Emitted formula: [2 [3 [1 body_f] [0 1]] [1 body_f]]
+        //   Step 1 (new_subj): eval [3 [1 body_f] [0 1]] against s
+        //                    = [body_f  s]   (cons body_f onto s)
+        //   Step 2 (new_form): eval [1 body_f] against s = body_f (quoted)
+        //   Step 3: eval body_f against [body_f  s]
+        //           → body_f lives at axis 2 of the new subject; Loop uses [0 2].
         // ------------------------------------------------------------------
         Expr::Trap(body) => {
-            lower_in(*body, env)
+            let trap_env = Env { in_trap: true, ..env.push("$") };
+            let body_f = lower_in(*body, &trap_env)?;
+            // [3 [1 body_f] [0 1]]  — new_subj formula: cons body_f onto current subject
+            let setup = op3(Noun::cell(Noun::Atom(1), body_f.clone()), axis(1));
+            // [1 body_f]            — new_form formula: the quoted body itself
+            let quoted_body = Noun::cell(Noun::Atom(1), body_f);
+            Ok(op2(setup, quoted_body))
         }
 
         // ------------------------------------------------------------------
-        // Loop (recur) — not yet implemented
+        // Loop (recur) — tail-call back to the enclosing Trap.
+        //
+        // The trap subject is [body_f  outer_subj]; body_f is at axis 2.
+        // [2 [0 1] [0 2]]:
+        //   new_subj = eval([0 1], s) = s  (identity — keep current subject)
+        //   new_form = eval([0 2], s) = body_f (slot 2 of trap subject)
+        //   → restarts body_f from the top with whatever subject was current
+        //     (which rebind may have mutated in-place).
         // ------------------------------------------------------------------
-        Expr::Loop => Err(lower_err("loop recur ($) not yet implemented")),
+        Expr::Loop => {
+            if env.in_trap {
+                Ok(op2(axis(1), axis(2)))
+            } else {
+                Err(lower_err("recur ($) outside trap"))
+            }
+        }
 
         // ------------------------------------------------------------------
         // Match — pattern switch with equality arms.
@@ -469,16 +500,67 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         }
 
         // ------------------------------------------------------------------
-        // Door / Arm — not yet implemented
+        // Door — multi-arm core: [battery  payload].
+        //
+        // Battery = right-nested cons of quoted arm formulas, nil-terminated:
+        //   [3 [1 arm0_f] [3 [1 arm1_f] [1 0]]]
+        // Door formula = [3 battery_f [0 1]]
+        //   → produces [battery  current_subject] at runtime.
+        //
+        // Arm axis in the door noun:
+        //   arm 0 → axis 4 (head of battery = head of door head)
+        //   arm 1 → axis 10, arm 2 → axis 22, …
         // ------------------------------------------------------------------
-        Expr::Door(_) | Expr::Arm { .. } => {
-            Err(lower_err("Door not yet implemented"))
+        Expr::Door(arms) => {
+            if arms.is_empty() {
+                return Err(lower_err("door with no arms"));
+            }
+            // Build battery from right to left; nil = [1 0]
+            let mut battery_f: Noun = Noun::cell(Noun::Atom(1), Noun::Atom(0));
+            for arm in arms.into_iter().rev() {
+                let arm_body_f = match arm {
+                    Expr::Arm { body, .. } => lower_in(*body, env)?,
+                    other => lower_in(other, env)?,
+                };
+                // Store arm formula quoted so it's a value in the battery cons-list
+                let quoted_arm = Noun::cell(Noun::Atom(1), arm_body_f);
+                battery_f = op3(quoted_arm, battery_f);
+            }
+            // Door = cons battery onto current subject
+            Ok(op3(battery_f, axis(1)))
         }
 
         // ------------------------------------------------------------------
-        // Rebind — not yet implemented
+        // Arm — standalone (should normally appear only inside Door).
         // ------------------------------------------------------------------
-        Expr::Rebind { .. } => Err(lower_err("Rebind not yet implemented")),
+        Expr::Arm { name: _, body } => {
+            lower_in(*body, env)
+        }
+
+        // ------------------------------------------------------------------
+        // Rebind { slot, value, body } — update a let-bound slot in-place.
+        //
+        // Rebuilds the subject with the named slot replaced by value_f,
+        // keeping all other slots intact.  Subject structure is preserved
+        // (body_f is still at axis 2 of the trap subject), enabling Loop.
+        //
+        // Formula emitted: [2 new_subj_f [1 body_f]]
+        //   where new_subj_f replaces slot at `depth` and keeps all others.
+        //
+        // depth 0 (axis 2): new_subj_f = [3 value_f [0 3]]
+        // depth 1 (axis 6): new_subj_f = [3 [0 2] [3 value_f [0 7]]]
+        // depth 2 (axis 14): new_subj_f = [3 [0 2] [3 [0 6] [3 value_f [0 15]]]]
+        // ------------------------------------------------------------------
+        Expr::Rebind { slot, value, body } => {
+            let depth = env.stack.iter().position(|n| n == &slot)
+                .ok_or_else(|| lower_err(format!("rebind: unbound name '{slot}'")))?;
+            let value_f = lower_in(*value, env)?;
+            let new_subj_f = rebind_subj_formula(depth, value_f)?;
+            // body compiled against same env: slot is still at same depth
+            let body_f = lower_in(*body, env)?;
+            let quoted_body = Noun::cell(Noun::Atom(1), body_f);
+            Ok(op2(new_subj_f, quoted_body))
+        }
 
         // ------------------------------------------------------------------
         // Everything else
@@ -529,6 +611,33 @@ fn unary_op(op: u64, args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
     }
     let xf = lower_in(args[0].clone(), env)?;
     Ok(Noun::cell(Noun::Atom(op), xf))
+}
+
+/// Build a formula that reconstructs the subject with the slot at `depth` replaced by `value_f`.
+///
+/// The subject is a right-nested cons list: [v0 [v1 [v2 ... rest]]].
+/// depth 0 value is at axis 2; depth 1 at axis 6; depth d at axis (1<<(d+2))-2.
+/// The tail after depth d is at axis (1<<(d+2))-1 = stack_axis(d) + 1.
+///
+/// Pattern:
+///   depth 0: [3 value_f [0 3]]
+///   depth 1: [3 [0 2] [3 value_f [0 7]]]
+///   depth 2: [3 [0 2] [3 [0 6] [3 value_f [0 15]]]]
+fn rebind_subj_formula(depth: usize, value_f: Noun) -> Result<Noun, LowerError> {
+    if depth > 7 {
+        return Err(lower_err("rebind depth > 7 not supported"));
+    }
+    // tail_axis at depth d = stack_axis(d) + 1 = (1<<(d+2)) - 1
+    let tail_axis = (1u64 << (depth + 2)) - 1;
+    // Innermost piece: [3 value_f [0 tail_axis]]
+    let mut formula = op3(value_f, axis(tail_axis));
+    // Wrap with head-preserving ops for depths 0..depth (in reverse)
+    // e.g. depth=2: wrap with [3 [0 6] …] then [3 [0 2] …]
+    for d in (0..depth).rev() {
+        let head_axis = stack_axis(d);
+        formula = op3(axis(head_axis), formula);
+    }
+    Ok(formula)
 }
 
 fn lower_err(msg: impl Into<String>) -> LowerError {
@@ -758,5 +867,88 @@ mod tests {
         let f = lower(expr).unwrap();
         let result = rune_interp::eval(&Noun::Atom(0), &f).unwrap();
         assert_eq!(result, Noun::Atom(0)); // 0 = true
+    }
+
+    #[test]
+    fn trap_executes_body() {
+        // loop { 42 }  → (executes once, no recur) → 42
+        let expr = Expr::Trap(Box::new(Expr::Atom(42)));
+        let f = lower(expr).unwrap();
+        let result = rune_interp::eval(&Noun::Atom(0), &f).unwrap();
+        assert_eq!(result, Noun::Atom(42));
+    }
+
+    #[test]
+    fn trap_loop_recurs() {
+        // let counter = 0; loop { if counter == 3 { counter } else { rebind counter = counter+1; continue } }
+        // Counts from 0 to 3, returning 3.
+        let loop_body = Expr::If {
+            cond: Box::new(Expr::Eq(
+                Box::new(Expr::Sym("counter".into())),
+                Box::new(Expr::Atom(3)),
+            )),
+            yes: Box::new(Expr::Sym("counter".into())),
+            no: Box::new(Expr::Rebind {
+                slot: "counter".into(),
+                value: Box::new(Expr::Call {
+                    gate: Box::new(Expr::Sym("add".into())),
+                    args: vec![Expr::Sym("counter".into()), Expr::Atom(1)],
+                }),
+                body: Box::new(Expr::Loop),
+            }),
+        };
+        let expr = Expr::Let {
+            name: "counter".into(),
+            mold: None,
+            value: Box::new(Expr::Atom(0)),
+            body: Box::new(Expr::Trap(Box::new(loop_body))),
+        };
+        let f = lower(expr).unwrap();
+        let result = rune_interp::eval(&Noun::Atom(0), &f).unwrap();
+        assert_eq!(result, Noun::Atom(3));
+    }
+
+    #[test]
+    fn rebind_depth_0() {
+        // let x = 5; rebind x = 10; x → 10
+        let expr = Expr::Let {
+            name: "x".into(),
+            mold: None,
+            value: Box::new(Expr::Atom(5)),
+            body: Box::new(Expr::Rebind {
+                slot: "x".into(),
+                value: Box::new(Expr::Atom(10)),
+                body: Box::new(Expr::Sym("x".into())),
+            }),
+        };
+        let f = lower(expr).unwrap();
+        let result = rune_interp::eval(&Noun::Atom(0), &f).unwrap();
+        assert_eq!(result, Noun::Atom(10));
+    }
+
+    #[test]
+    fn rebind_depth_1() {
+        // let a = 1; let b = 2; rebind a = 99; a + b → 101
+        let expr = Expr::Let {
+            name: "a".into(),
+            mold: None,
+            value: Box::new(Expr::Atom(1)),
+            body: Box::new(Expr::Let {
+                name: "b".into(),
+                mold: None,
+                value: Box::new(Expr::Atom(2)),
+                body: Box::new(Expr::Rebind {
+                    slot: "a".into(),
+                    value: Box::new(Expr::Atom(99)),
+                    body: Box::new(Expr::Call {
+                        gate: Box::new(Expr::Sym("add".into())),
+                        args: vec![Expr::Sym("a".into()), Expr::Sym("b".into())],
+                    }),
+                }),
+            }),
+        };
+        let f = lower(expr).unwrap();
+        let result = rune_interp::eval(&Noun::Atom(0), &f).unwrap();
+        assert_eq!(result, Noun::Atom(101));
     }
 }

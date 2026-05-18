@@ -140,10 +140,44 @@ pub fn formula_hash(noun: &Noun) -> u64 {
     }
 }
 
+/// Cache of (formula_hash, subject_hash) → result.
+/// Only used for pure formulas (no dynamic opcodes).
+struct ResultCache {
+    inner: HashMap<(u64, u64), Noun>,
+    max_entries: usize,
+}
+
+impl ResultCache {
+    fn new(max_entries: usize) -> Self {
+        ResultCache { inner: HashMap::new(), max_entries }
+    }
+
+    fn get(&self, formula_hash: u64, subject_hash: u64) -> Option<&Noun> {
+        self.inner.get(&(formula_hash, subject_hash))
+    }
+
+    fn store(&mut self, formula_hash: u64, subject_hash: u64, result: Noun) {
+        if self.inner.len() < self.max_entries {
+            self.inner.insert((formula_hash, subject_hash), result);
+        }
+        // When full: evict nothing (simple LRU-free policy for now)
+        // Future: LRU eviction
+    }
+
+    fn len(&self) -> usize { self.inner.len() }
+}
+
+/// Stats snapshot returned by `TierRouter::stats`.
+pub struct TierStats {
+    pub result_cache_entries: usize,
+}
+
 /// TierRouter — makes the call-tier decision.
 pub struct TierRouter {
     counter: CallCounter,
     cache: ArtifactCache,
+    results: ResultCache,
+    hot_threshold: u64,
 }
 
 impl TierRouter {
@@ -151,29 +185,55 @@ impl TierRouter {
         TierRouter {
             counter: CallCounter::new(compile_threshold),
             cache: ArtifactCache::new(),
+            results: ResultCache::new(1024),
+            hot_threshold: compile_threshold,
         }
     }
 
     /// Evaluate formula against subject, routing through the appropriate tier.
     pub fn eval(&mut self, subject: &Noun, formula: &Noun) -> Result<Noun, rune_interp::InterpError> {
-        let hash = formula_hash(formula);
+        let fhash = formula_hash(formula);
+        let is_pure = !contains_dynamic(formula);
 
-        // Check if compiled artifact is available
-        if let Some(artifact) = self.cache.get(hash) {
-            return rune_interp::eval(subject, &artifact.formula);
+        // 1. Check result cache (pure formulas only)
+        if is_pure {
+            let shash = formula_hash(subject);
+            if let Some(cached) = self.results.get(fhash, shash) {
+                return Ok(cached.clone());
+            }
         }
 
-        // Run interpreter
-        let result = rune_interp::eval(subject, formula)?;
+        // 2. Check compiled artifact cache
+        let formula_to_run = if let Some(artifact) = self.cache.get(fhash) {
+            artifact.formula
+        } else {
+            formula.clone()
+        };
 
-        // Record call; if threshold reached, submit for compilation
-        if self.counter.record(hash) {
-            if let Some(artifact) = try_trident_compile(formula, hash) {
+        // 3. Interpret
+        let result = rune_interp::eval(subject, &formula_to_run)?;
+
+        // 4. Record call; on threshold: try to compile and cache artifact
+        if self.counter.record(fhash) {
+            if let Some(artifact) = try_trident_compile(formula, fhash) {
                 self.cache.store(artifact);
             }
         }
 
+        // 5. Memoize result for pure formulas that were called enough times
+        if is_pure && self.counter.count(fhash) >= self.hot_threshold {
+            let shash = formula_hash(subject);
+            self.results.store(fhash, shash, result.clone());
+        }
+
         Ok(result)
+    }
+
+    /// Returns stats useful for profiling and debugging.
+    pub fn stats(&self) -> TierStats {
+        TierStats {
+            result_cache_entries: self.results.len(),
+        }
     }
 }
 
@@ -209,5 +269,55 @@ mod tests {
         let formula = Noun::cell(Noun::Atom(1), Noun::Atom(42));
         let result = router.eval(&subj, &formula).unwrap();
         assert_eq!(result, Noun::Atom(42));
+    }
+
+    #[test]
+    fn result_cache_hit_after_threshold() {
+        let mut router = TierRouter::new(3);
+        let subj = Noun::Atom(0);
+        // Pure formula: [1 42] = literal 42
+        let formula = Noun::cell(Noun::Atom(1), Noun::Atom(42));
+
+        // Call 3 times to hit threshold
+        for _ in 0..3 {
+            let r = router.eval(&subj, &formula).unwrap();
+            assert_eq!(r, Noun::Atom(42));
+        }
+
+        // 4th call: result should come from cache
+        let r = router.eval(&subj, &formula).unwrap();
+        assert_eq!(r, Noun::Atom(42));
+        assert_eq!(router.stats().result_cache_entries, 1);
+    }
+
+    #[test]
+    fn dynamic_formula_not_memoized() {
+        let mut router = TierRouter::new(2);
+        let subj = Noun::Atom(0);
+        // Dynamic formula: [16 [1 0] [1 42]] — contains hint opcode
+        let hint_meta = Noun::cell(Noun::cell(Noun::Atom(1), Noun::Atom(0)), Noun::cell(Noun::Atom(1), Noun::Atom(0)));
+        let body = Noun::cell(Noun::Atom(1), Noun::Atom(42));
+        let dynamic = Noun::cell(Noun::Atom(16), Noun::cell(hint_meta, body));
+
+        for _ in 0..5 {
+            router.eval(&subj, &dynamic).unwrap();
+        }
+        // Dynamic formulas must not be memoized
+        assert_eq!(router.stats().result_cache_entries, 0);
+    }
+
+    #[test]
+    fn different_subjects_cached_separately() {
+        let mut router = TierRouter::new(2);
+        let formula = Noun::cell(Noun::Atom(1), Noun::Atom(99));
+
+        // Same formula, two different subjects
+        for _ in 0..3 {
+            router.eval(&Noun::Atom(0), &formula).unwrap();
+            router.eval(&Noun::Atom(1), &formula).unwrap();
+        }
+
+        // Each (formula, subject) pair cached separately
+        assert_eq!(router.stats().result_cache_entries, 2);
     }
 }
