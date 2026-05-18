@@ -35,6 +35,8 @@
 /// (not an atom opcode prefix), eval both sides against subject and return
 /// [result_f1, result_f2].  This is the "auto-cons" / distribute pattern.
 
+pub mod event;
+
 use rune_ast::Noun;
 use cyber_hemera as hemera;
 
