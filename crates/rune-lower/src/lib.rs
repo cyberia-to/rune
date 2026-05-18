@@ -115,8 +115,15 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
 
         // ------------------------------------------------------------------
         // Let binding — subject extension via cons+compose:
-        //   [2 [3 value-formula [0 1]] body-formula]
-        // Conses value onto the subject head; body sees it at axis 2.
+        //   [2 [3 value-formula [0 1]] [1 body-formula]]
+        //
+        // compose evaluates both arms against the original subject:
+        //   new_subj = eval(s, [3 val-f [0 1]])  = [val, s]
+        //   new_form = eval(s, [1 body-f])        = body-f   (literal)
+        //   eval(new_subj, new_form)               = eval([val, s], body-f)
+        //
+        // body-f uses axis 2 for the newly bound name, deeper axes for outer
+        // variables (already adjusted by env.push).
         // ------------------------------------------------------------------
         Expr::Let { name, value, body, .. } => {
             let vf = lower_in(*value, env)?;
@@ -125,8 +132,10 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
             // body sees the new binding at depth 0 (axis 2), rest shift
             let env2 = env.push(&name);
             let bf = lower_in(*body, &env2)?;
-            // [2 extend body-formula]  — compose
-            Ok(op2(extend, bf))
+            // [2 extend [1 body-formula]]  — quote the body so compose uses it
+            // as the new formula rather than evaluating it against original subject
+            let quoted_body = Noun::cell(Noun::Atom(1), bf);
+            Ok(op2(extend, quoted_body))
         }
 
         // ------------------------------------------------------------------
@@ -428,7 +437,8 @@ mod tests {
     #[test]
     fn lower_let_binding() {
         // Let { name: "x", value: Atom(99), body: Sym("x") }
-        // → [2 [3 [1 99] [0 1]] [0 2]]
+        // → [2 [3 [1 99] [0 1]] [1 [0 2]]]
+        // compose: new_subj = [99 s], new_form = [0 2] (quoted), eval → head = 99
         let expr = Expr::Let {
             name: "x".into(),
             mold: None,
@@ -436,7 +446,7 @@ mod tests {
             body: Box::new(sym("x")),
         };
         let f = lower(expr).unwrap();
-        // [2 [3 [1 99] [0 1]] [0 2]]
+        // [2 [3 [1 99] [0 1]] [1 [0 2]]]
         let expected = cell_noun(
             atom_noun(2),
             cell_noun(
@@ -447,7 +457,7 @@ mod tests {
                         cell_noun(atom_noun(0), atom_noun(1)),
                     ),
                 ),
-                cell_noun(atom_noun(0), atom_noun(2)),
+                cell_noun(atom_noun(1), cell_noun(atom_noun(0), atom_noun(2))),
             ),
         );
         assert_eq!(f, expected);

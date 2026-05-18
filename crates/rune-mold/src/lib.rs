@@ -2,7 +2,7 @@
 /// A mold is a gate (Noun → Noun) that idempotently normalizes values to their type.
 /// Molds are runtime values: composable, storable, passable.
 /// The compiler also evaluates them statically for type checking.
-use rune_ast::Noun;
+use rune_ast::{Expr, Noun};
 
 /// A mold: a normalizing function from Noun to Noun.
 /// `normalize` returns Ok(canonical) or Err if the value is outside the mold.
@@ -62,6 +62,55 @@ impl Mold for NeuronMold {
     }
 }
 
+/// `@p` — phonetic: any atom, displayed in phonetic syllables
+pub struct PMold;
+impl Mold for PMold {
+    fn name(&self) -> &str { "@p" }
+    fn normalize(&self, noun: &Noun) -> Result<Noun, MoldError> {
+        match noun {
+            Noun::Atom(_) => Ok(noun.clone()),
+            _ => Err(MoldError { message: "@p: expected atom".into() }),
+        }
+    }
+}
+
+/// `@tas` — term/symbol: any atom representing a symbolic name
+pub struct TasMold;
+impl Mold for TasMold {
+    fn name(&self) -> &str { "@tas" }
+    fn normalize(&self, noun: &Noun) -> Result<Noun, MoldError> {
+        match noun {
+            Noun::Atom(_) => Ok(noun.clone()),
+            _ => Err(MoldError { message: "@tas: expected atom".into() }),
+        }
+    }
+}
+
+/// `@t` — text cord: any atom representing UTF-8 bytes
+pub struct TMold;
+impl Mold for TMold {
+    fn name(&self) -> &str { "@t" }
+    fn normalize(&self, noun: &Noun) -> Result<Noun, MoldError> {
+        match noun {
+            Noun::Atom(_) => Ok(noun.clone()),
+            _ => Err(MoldError { message: "@t: expected atom".into() }),
+        }
+    }
+}
+
+/// `@flag` — boolean: must be atom 0 or 1
+pub struct FlagMold;
+impl Mold for FlagMold {
+    fn name(&self) -> &str { "@flag" }
+    fn normalize(&self, noun: &Noun) -> Result<Noun, MoldError> {
+        match noun {
+            Noun::Atom(0) | Noun::Atom(1) => Ok(noun.clone()),
+            Noun::Atom(n) => Err(MoldError { message: format!("@flag: expected 0 or 1, got {n}") }),
+            _ => Err(MoldError { message: "@flag: expected atom".into() }),
+        }
+    }
+}
+
 /// Resolve a mold name to its implementation.
 /// Algebra-specific molds (@nebu, @kuro, etc.) land when strata crate is integrated.
 pub fn resolve(name: &str) -> Option<Box<dyn Mold>> {
@@ -70,6 +119,197 @@ pub fn resolve(name: &str) -> Option<Box<dyn Mold>> {
         "@da"     | "da"     => Some(Box::new(DaMold)),
         "#"                  => Some(Box::new(ParticleMold)),
         "@neuron" | "neuron" => Some(Box::new(NeuronMold)),
+        "@p"      | "p"      => Some(Box::new(PMold)),
+        "@tas"    | "tas"    => Some(Box::new(TasMold)),
+        "@t"      | "t"      => Some(Box::new(TMold)),
+        "@flag"   | "flag"   => Some(Box::new(FlagMold)),
         _ => None,
+    }
+}
+
+/// Static mold checker — walks AST and emits soft warnings (non-blocking).
+pub struct MoldChecker {
+    bindings: Vec<(String, String)>, // name → mold_name
+    errors: Vec<MoldError>,
+}
+
+impl MoldChecker {
+    /// Walk `expr` and return all mold violations found.
+    pub fn check(expr: &Expr) -> Vec<MoldError> {
+        let mut checker = MoldChecker { bindings: Vec::new(), errors: Vec::new() };
+        checker.check_expr(expr);
+        checker.errors
+    }
+
+    fn check_expr(&mut self, expr: &Expr) {
+        match expr {
+            Expr::Let { name, mold, value, body } => {
+                self.check_expr(value);
+                // If the let has a mold annotation, record the binding
+                if let Some(mold_expr) = mold {
+                    let mold_name = self.mold_name(mold_expr);
+                    self.bindings.push((name.clone(), mold_name));
+                }
+                self.check_expr(body);
+                // Pop binding after body (shadowing safe via stack)
+                if mold.is_some() {
+                    self.bindings.pop();
+                }
+            }
+
+            Expr::Call { gate: gate_expr, args } => {
+                // Check arithmetic builtins: require exactly 2 args
+                if let Expr::Sym(op) = gate_expr.as_ref() {
+                    match op.as_str() {
+                        "add" | "sub" | "mul" => {
+                            if args.len() != 2 {
+                                self.errors.push(MoldError {
+                                    message: format!(
+                                        "mold warning: `{op}` expects 2 arguments, got {}",
+                                        args.len()
+                                    ),
+                                });
+                            }
+                            // Check that args are @ud if their types are known
+                            for arg in args {
+                                self.check_arg_ud(arg);
+                                self.check_expr(arg);
+                            }
+                        }
+                        _ => {
+                            for arg in args { self.check_expr(arg); }
+                            self.check_expr(gate_expr);
+                        }
+                    }
+                } else {
+                    self.check_expr(gate_expr);
+                    for arg in args { self.check_expr(arg); }
+                }
+            }
+
+            Expr::Gate { sample, body } => {
+                self.check_expr(sample);
+                self.check_expr(body);
+            }
+            Expr::If { cond, yes, no } => {
+                self.check_expr(cond);
+                self.check_expr(yes);
+                self.check_expr(no);
+            }
+            Expr::Eq(a, b) => { self.check_expr(a); self.check_expr(b); }
+            Expr::Inc(x)   => { self.check_expr(x); }
+            Expr::Cell(h, t) => { self.check_expr(h); self.check_expr(t); }
+            Expr::Trap(body) => { self.check_expr(body); }
+            Expr::Compose(l, r) => { self.check_expr(l); self.check_expr(r); }
+            Expr::Hint { selector, body, .. } => {
+                self.check_expr(selector);
+                self.check_expr(body);
+            }
+            // Leaves — nothing to check
+            Expr::Atom(_) | Expr::Sym(_) | Expr::Address(_) | Expr::Loop => {}
+            // Remaining variants — recurse if possible, skip otherwise
+            _ => {}
+        }
+    }
+
+    /// Check that an argument is consistent with @ud (atom) if its type is known.
+    fn check_arg_ud(&mut self, arg: &Expr) {
+        match arg {
+            Expr::Cell(_, _) => {
+                self.errors.push(MoldError {
+                    message: "mold warning: arithmetic argument appears to be a cell, expected @ud".into(),
+                });
+            }
+            Expr::Sym(name) => {
+                // Look up in bindings; warn if known to be non-@ud
+                if let Some(mold_name) = self.lookup_mold(name) {
+                    if mold_name != "@ud" && mold_name != "ud" {
+                        self.errors.push(MoldError {
+                            message: format!(
+                                "mold warning: arithmetic argument `{name}` has mold `{mold_name}`, expected @ud"
+                            ),
+                        });
+                    }
+                }
+            }
+            _ => {} // atom literals and unknown expressions are fine
+        }
+    }
+
+    fn lookup_mold(&self, name: &str) -> Option<String> {
+        self.bindings.iter().rev().find(|(n, _)| n == name).map(|(_, m)| m.clone())
+    }
+
+    /// Extract a mold name string from a mold expression.
+    fn mold_name(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Address(rune_ast::Address::Neuron(name)) => format!("@{name}"),
+            Expr::Sym(s) => s.clone(),
+            _ => "<unknown>".into(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ud_accepts_atom() {
+        assert!(UdMold.check(&Noun::Atom(42)));
+    }
+
+    #[test]
+    fn flag_accepts_zero_one() {
+        assert!(FlagMold.check(&Noun::Atom(0)));
+        assert!(FlagMold.check(&Noun::Atom(1)));
+        assert!(!FlagMold.check(&Noun::Atom(2)));
+    }
+
+    #[test]
+    fn flag_rejects_cell() {
+        assert!(!FlagMold.check(&Noun::Cell(Box::new(Noun::Atom(0)), Box::new(Noun::Atom(1)))));
+    }
+
+    #[test]
+    fn resolve_new_molds() {
+        assert!(resolve("@p").is_some());
+        assert!(resolve("@tas").is_some());
+        assert!(resolve("@t").is_some());
+        assert!(resolve("@flag").is_some());
+    }
+
+    #[test]
+    fn checker_warns_on_bad_arg_count() {
+        // add(1) — wrong arg count
+        let expr = Expr::Call {
+            gate: Box::new(Expr::Sym("add".into())),
+            args: vec![Expr::Atom(1)],
+        };
+        let errs = MoldChecker::check(&expr);
+        assert!(!errs.is_empty());
+    }
+
+    #[test]
+    fn checker_ok_on_correct_add() {
+        let expr = Expr::Call {
+            gate: Box::new(Expr::Sym("add".into())),
+            args: vec![Expr::Atom(1), Expr::Atom(2)],
+        };
+        let errs = MoldChecker::check(&expr);
+        assert!(errs.is_empty());
+    }
+
+    #[test]
+    fn checker_warns_cell_in_arithmetic() {
+        let expr = Expr::Call {
+            gate: Box::new(Expr::Sym("mul".into())),
+            args: vec![
+                Expr::Cell(Box::new(Expr::Atom(1)), Box::new(Expr::Atom(2))),
+                Expr::Atom(3),
+            ],
+        };
+        let errs = MoldChecker::check(&expr);
+        assert!(!errs.is_empty());
     }
 }

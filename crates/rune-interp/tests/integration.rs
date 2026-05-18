@@ -1,0 +1,50 @@
+/// Integration tests: parse → lower → eval end-to-end.
+///
+/// The `run` helper takes a rune source string, parses it with the classic
+/// register parser, lowers it to a Nox formula, evaluates against a minimal
+/// subject, and returns the atom result as u64.  These tests exercise the
+/// full pipeline for representative programs.
+use rune_interp::eval;
+use rune_lower::lower;
+use rune_parse::parse;
+use rune_subject::Subject;
+
+/// Parse src, lower to Nox formula, eval against minimal subject, return u64.
+fn run(src: &str) -> u64 {
+    let expr = parse(src).unwrap_or_else(|e| panic!("parse error in {:?}: {}", src, e.message));
+    let formula = lower(expr).unwrap_or_else(|e| panic!("lower error in {:?}: {}", src, e.message));
+    let subject = Subject::minimal().to_noun();
+    let result = eval(&subject, &formula)
+        .unwrap_or_else(|e| panic!("eval error in {:?}: {}", src, e.message));
+    match result {
+        rune_ast::Noun::Atom(n) => n,
+        _ => panic!("expected atom result for {:?}, got cell", src),
+    }
+}
+
+#[test]
+fn literal_42() {
+    assert_eq!(run("42"), 42);
+}
+
+#[test]
+fn add_5_plus_3() {
+    assert_eq!(run("5 + 3"), 8);
+}
+
+#[test]
+fn mul_6_times_7() {
+    assert_eq!(run("6 * 7"), 42);
+}
+
+#[test]
+fn let_x_equals_10() {
+    // `let x = 10; x` — bind x to 10 in the extended subject, then resolve x
+    assert_eq!(run("let x = 10; x"), 10);
+}
+
+#[test]
+fn if_zero_eq_zero_takes_yes() {
+    // `if 0 == 0 { 1 } else { 2 }` — cond is 0==0 → eq returns 0 (equal) → branch takes yes
+    assert_eq!(run("if 0 == 0 { 1 } else { 2 }"), 1);
+}

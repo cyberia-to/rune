@@ -1,0 +1,13 @@
+[package]
+name = "rune-compile"
+version = "0.1.0"
+edition = "2021"
+description = "rune compile back-end — background compilation and tier management"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rune-ast     = { workspace = true }
+rune-lower   = { workspace = true }
+rune-interp  = { workspace = true }

@@ -8,5 +8,6 @@ description = "rune parser — classic (rust) register; pure (rune) register lan
 path = "src/lib.rs"
 
 [dependencies]
-rune-ast = { workspace = true }
-rune-lex = { workspace = true }
+rune-ast        = { workspace = true }
+rune-lex        = { workspace = true }
+rune-parse-pure = { workspace = true }

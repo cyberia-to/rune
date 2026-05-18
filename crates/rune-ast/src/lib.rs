@@ -45,8 +45,14 @@ pub enum Expr {
     Cast { mold: Box<Expr>, expr: Box<Expr> },
     /// Increment (Nox pattern 4)
     Inc(Box<Expr>),
-    /// Equality test (Nox pattern 5)
+    /// Equality test (Nox pattern 9)
     Eq(Box<Expr>, Box<Expr>),
+    /// Field addition (Nox pattern 5)
+    Add(Box<Expr>, Box<Expr>),
+    /// Field subtraction (Nox pattern 6)
+    Sub(Box<Expr>, Box<Expr>),
+    /// Field multiplication (Nox pattern 7)
+    Mul(Box<Expr>, Box<Expr>),
     /// Evaluate formula against subject (Nox pattern 2 / `.*`)
     Eval { subject: Box<Expr>, formula: Box<Expr> },
     /// Scry — read from the cybergraph (`.^`)

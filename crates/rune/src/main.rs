@@ -50,7 +50,8 @@ fn run_source(src: &str) {
         Err(e) => { eprintln!("lower error: {}", e.message); std::process::exit(1); }
     };
     let subject = rune_subject::Subject::minimal().to_noun();
-    match rune_interp::eval(&subject, &formula) {
+    let mut router = rune_compile::TierRouter::new(10);  // compile after 10 calls
+    match router.eval(&subject, &formula) {
         Ok(result) => println!("{}", display_noun(&result)),
         Err(e)     => { eprintln!("eval error: {}", e.message); std::process::exit(1); }
     }
