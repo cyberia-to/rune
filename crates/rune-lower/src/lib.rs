@@ -55,12 +55,29 @@ struct GateDef {
     body_expr: Expr,
 }
 
+/// An arm definition inside a door (for method call inlining).
+#[derive(Clone)]
+struct ArmDef {
+    name: String,
+    params: Vec<String>,
+    body_expr: Expr,
+}
+
+/// A door definition stored for method-call inlining.
+#[derive(Clone)]
+struct DoorDef {
+    door_name: String,
+    arms: Vec<ArmDef>,
+}
+
 #[derive(Default, Clone)]
 struct Env {
     /// Bound names, newest at index 0.
     stack: Vec<String>,
     /// Known gate definitions, for inlining at call sites.
     gates: Vec<GateDef>,
+    /// Known door definitions, for method-call inlining.
+    doors: Vec<DoorDef>,
     /// True when compiling inside a Trap body (enables Loop/recur).
     in_trap: bool,
 }
@@ -79,6 +96,18 @@ impl Env {
         let mut e = self.push(name);
         e.gates.push(GateDef { name: name.to_string(), params, body_expr });
         e
+    }
+
+    /// Push `name` as a stack binding AND record a door definition for method-call inlining.
+    fn push_door(&self, name: &str, arms: Vec<ArmDef>) -> Self {
+        let mut e = self.push(name);
+        e.doors.push(DoorDef { door_name: name.to_string(), arms });
+        e
+    }
+
+    /// Find a door definition by name (last one wins).
+    fn find_door(&self, name: &str) -> Option<&DoorDef> {
+        self.doors.iter().rev().find(|d| d.door_name == name)
     }
 
     /// Look up `name`; returns Some(axis) where axis = stack_axis(index).
@@ -180,6 +209,7 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         // ------------------------------------------------------------------
         Expr::Let { name, value, body, .. } => {
             let is_gate = matches!(*value, Expr::Gate { .. });
+            let is_door = matches!(*value, Expr::Door(_));
 
             let (vf, env2) = if is_gate {
                 // Destructure the Gate variant
@@ -200,6 +230,29 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
                 // at each call site against the call-site env.
                 let env2 = env.push_gate(&name, params, *gate_body);
                 (placeholder, env2)
+            } else if is_door {
+                // Extract arm definitions for method dispatch
+                let door_arms = match *value {
+                    Expr::Door(arm_exprs) => arm_exprs,
+                    _ => unreachable!(),
+                };
+                let mut arm_defs = Vec::new();
+                for arm_expr in &door_arms {
+                    if let Expr::Arm { name: arm_name, body: arm_body } = arm_expr {
+                        let (params, body_expr) = match arm_body.as_ref() {
+                            Expr::Gate { sample, body: gb } => (extract_params(sample), *gb.clone()),
+                            other => (vec![], other.clone()),
+                        };
+                        arm_defs.push(ArmDef { name: arm_name.clone(), params, body_expr });
+                    }
+                }
+                // Lower the door formula (battery + payload)
+                let door_formula = lower_in(Expr::Door(door_arms), env)?;
+                let env2 = env.push_door(&name, arm_defs);
+                let extend = op3(door_formula, axis(1));
+                let bf = lower_in(*body, &env2)?;
+                let quoted_body = Noun::cell(Noun::Atom(1), bf);
+                return Ok(op2(extend, quoted_body));
             } else {
                 let vf = lower_in(*value, env)?;
                 let env2 = env.push(&name);
@@ -570,6 +623,47 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
             let body_f = lower_in(*body, env)?;
             let quoted_body = Noun::cell(Noun::Atom(1), body_f);
             Ok(op2(new_subj_f, quoted_body))
+        }
+
+        // ------------------------------------------------------------------
+        // MethodCall — inline a door arm at the call site.
+        //
+        // Looks up the door definition, finds the named arm, then inlines
+        // the arm body with args cons-ed onto the subject (same as gate call
+        // inlining).  Formula: [2 chain [1 body_f]]
+        // ------------------------------------------------------------------
+        Expr::MethodCall { obj, method, args } => {
+            // Find the door definition to get the arm body for inlining.
+            // Clone everything needed before any mutable borrow of env.
+            let (arm_params, arm_body) = {
+                let door_def = env.find_door(&obj)
+                    .ok_or_else(|| lower_err(format!("no door named '{obj}'")))?;
+                let arm = door_def.arms.iter().find(|a| a.name == method)
+                    .ok_or_else(|| lower_err(format!("door '{obj}' has no arm '{method}'")))?;
+                if args.len() != arm.params.len() {
+                    return Err(lower_err(format!(
+                        "arm '{}.{}' takes {} args, got {}",
+                        obj, method, arm.params.len(), args.len()
+                    )));
+                }
+                (arm.params.clone(), arm.body_expr.clone())
+            };
+
+            // Build body env: push params in reverse order onto call-site env.
+            let mut call_body_env = env.clone();
+            for p in arm_params.iter().rev() {
+                call_body_env = call_body_env.push(p);
+            }
+            let body_f = lower_in(arm_body, &call_body_env)?;
+
+            // Build args chain: [3 a1-f [3 a2-f [... [0 1]]]]
+            let mut chain = axis(1);
+            for arg in args.into_iter().rev() {
+                let af = lower_in(arg, env)?;
+                chain = op3(af, chain);
+            }
+            let quoted_body = Noun::cell(Noun::Atom(1), body_f);
+            Ok(op2(chain, quoted_body))
         }
 
         // ------------------------------------------------------------------

@@ -104,6 +104,8 @@ impl Parser {
                 }
                 Token::Ident(ref s) if s == "<" => ("lt", 1),
                 Token::Ident(ref s) if s == ">" => ("gt", 1),
+                Token::Ident(ref s) if s == "<=" => ("lte", 1),
+                Token::Ident(ref s) if s == ">=" => ("gte", 1),
                 _ => break,
             };
 
@@ -127,6 +129,24 @@ impl Parser {
                 },
                 "lt"  => Expr::Call { gate: Box::new(Expr::Sym("lt".into())), args: vec![lhs, rhs] },
                 "gt"  => Expr::Call { gate: Box::new(Expr::Sym("gt".into())), args: vec![lhs, rhs] },
+                // a <= b  →  if gt(a, b) { 1 } else { 0 }  (logical negation of gt)
+                "lte" => Expr::If {
+                    cond: Box::new(Expr::Call {
+                        gate: Box::new(Expr::Sym("gt".into())),
+                        args: vec![lhs, rhs],
+                    }),
+                    yes: Box::new(Expr::Atom(1)),
+                    no:  Box::new(Expr::Atom(0)),
+                },
+                // a >= b  →  if lt(a, b) { 1 } else { 0 }  (logical negation of lt)
+                "gte" => Expr::If {
+                    cond: Box::new(Expr::Call {
+                        gate: Box::new(Expr::Sym("lt".into())),
+                        args: vec![lhs, rhs],
+                    }),
+                    yes: Box::new(Expr::Atom(1)),
+                    no:  Box::new(Expr::Atom(0)),
+                },
                 _ => unreachable!(),
             };
         }
@@ -341,6 +361,23 @@ impl Parser {
 
     fn parse_call_or_atom(&mut self) -> Result<Expr, ParseError> {
         let base = self.parse_primary()?;
+        // method call: `obj.method(args)`
+        if matches!(self.peek(), Token::Dot) {
+            self.advance(); // consume '.'
+            let method = self.expect_ident()?;
+            self.expect(Token::LParen)?;
+            let mut args = Vec::new();
+            while !matches!(self.peek(), Token::RParen | Token::Eof) {
+                args.push(self.parse_expr()?);
+                if matches!(self.peek(), Token::Comma) { self.advance(); }
+            }
+            self.expect(Token::RParen)?;
+            let obj = match base {
+                Expr::Sym(name) => name,
+                _ => return Err(self.err("method call requires simple name on left side")),
+            };
+            return Ok(Expr::MethodCall { obj, method, args });
+        }
         // call: `gate(arg, arg)`
         if matches!(self.peek(), Token::LParen) {
             self.advance();
@@ -487,8 +524,24 @@ pub fn format_expr(expr: &rune_ast::Expr) -> String {
             let annotation = mold.as_ref().map(|m| format!(": {}", format_expr(m))).unwrap_or_default();
             format!("let {}{} = {};\n{}", name, annotation, format_expr(value), format_expr(body))
         }
-        Expr::If { cond, yes, no } =>
-            format!("if {} {{\n    {}\n}} else {{\n    {}\n}}", format_expr(cond), format_expr(yes), format_expr(no)),
+        Expr::If { cond, yes, no } => {
+            // Detect <= and >= sugar: if gt(a,b) { 1 } else { 0 }  and  if lt(a,b) { 1 } else { 0 }
+            if matches!(yes.as_ref(), Expr::Atom(1)) && matches!(no.as_ref(), Expr::Atom(0)) {
+                if let Expr::Call { gate: cond_gate, args: cond_args } = cond.as_ref() {
+                    if let Expr::Sym(cond_name) = cond_gate.as_ref() {
+                        if let [ca, cb] = cond_args.as_slice() {
+                            if cond_name == "gt" {
+                                return format!("{} <= {}", format_expr(ca), format_expr(cb));
+                            }
+                            if cond_name == "lt" {
+                                return format!("{} >= {}", format_expr(ca), format_expr(cb));
+                            }
+                        }
+                    }
+                }
+            }
+            format!("if {} {{\n    {}\n}} else {{\n    {}\n}}", format_expr(cond), format_expr(yes), format_expr(no))
+        }
         Expr::Gate { sample, body } => {
             let params = match sample.as_ref() {
                 Expr::Sym(s) if s.starts_with("param:") => s["param:".len()..].replace(';', ", "),
@@ -514,6 +567,9 @@ pub fn format_expr(expr: &rune_ast::Expr) -> String {
                 }
             }
             format!("{}({})", format_expr(gate), args.iter().map(format_expr).collect::<Vec<_>>().join(", "))
+        }
+        Expr::MethodCall { obj, method, args } => {
+            format!("{}.{}({})", obj, method, args.iter().map(format_expr).collect::<Vec<_>>().join(", "))
         }
         Expr::Eq(a, b) => format!("{} == {}", format_expr(a), format_expr(b)),
         Expr::Inc(x) => format!("{} + 1", format_expr(x)),

@@ -65,6 +65,8 @@ pub enum Expr {
     Arm { name: String, body: Box<Expr> },
     /// Door: multi-arm core
     Door(Vec<Expr>),
+    /// Method call on a door: obj.method(args)
+    MethodCall { obj: String, method: String, args: Vec<Expr> },
     /// A cybermark address embedded in expression context
     Address(Address),
 }

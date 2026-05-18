@@ -118,3 +118,33 @@ factorial(5)
 "#;
     assert_eq!(run(src), 120);
 }
+
+#[test]
+fn lte_operator() {
+    // 3 <= 5 → true (0), 5 <= 3 → false (1), 3 <= 3 → true (0)
+    assert_eq!(run("3 <= 5"), 0);
+    assert_eq!(run("5 <= 3"), 1);
+    assert_eq!(run("3 <= 3"), 0);
+}
+
+#[test]
+fn gte_operator() {
+    // 5 >= 3 → true (0), 3 >= 5 → false (1), 3 >= 3 → true (0)
+    assert_eq!(run("5 >= 3"), 0);
+    assert_eq!(run("3 >= 5"), 1);
+    assert_eq!(run("3 >= 3"), 0);
+}
+
+#[test]
+fn door_arm_call_no_args() {
+    // impl { fn get(self) { 42 } }.get()
+    let src = "let counter = impl { fn get(self) { 42 } }; counter.get()";
+    assert_eq!(run(src), 42);
+}
+
+#[test]
+fn door_arm_call_with_arg() {
+    // impl { fn double(self, x) { x * 2 } }.double(5) → 10
+    let src = "let calc = impl { fn double(self, x) { x * 2 } }; calc.double(5)";
+    assert_eq!(run(src), 10);
+}
