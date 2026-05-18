@@ -1,0 +1,11 @@
+[package]
+name = "rune-subject"
+version = "0.1.0"
+edition = "2021"
+description = "rune subject model — ~self ~now ~here ~caps ~code ~libs ~mem ~world"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rune-ast = { workspace = true }

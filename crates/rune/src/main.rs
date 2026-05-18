@@ -1,0 +1,74 @@
+/// rune CLI
+///
+/// Commands:
+///   rune run <file>         parse, lower, and interpret a rune program
+///   rune eval <expr>        evaluate a single expression (REPL-style)
+///   rune fmt <file>         format source (--to=rust | --to=rune)
+///   rune check <file>       type-check without running
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let cmd = args.get(1).map(String::as_str);
+    let rest = if args.len() > 2 { &args[2..] } else { &[] };
+
+    match cmd {
+        Some("run")   => cmd_run(rest),
+        Some("eval")  => cmd_eval(rest),
+        Some("fmt")   => cmd_fmt(rest),
+        Some("check") => cmd_check(rest),
+        Some("help") | None => print_help(),
+        Some(c) => { eprintln!("unknown command: {c}"); std::process::exit(1); }
+    }
+}
+
+fn cmd_run(args: &[String]) {
+    let path = args.first().unwrap_or_else(|| { eprintln!("usage: rune run <file>"); std::process::exit(1); });
+    let src = std::fs::read_to_string(path).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1); });
+    run_source(&src);
+}
+
+fn cmd_eval(args: &[String]) {
+    let expr = args.first().unwrap_or_else(|| { eprintln!("usage: rune eval <expr>"); std::process::exit(1); });
+    run_source(expr);
+}
+
+fn cmd_fmt(_args: &[String]) {
+    eprintln!("fmt: not yet implemented (M4)");
+}
+
+fn cmd_check(_args: &[String]) {
+    eprintln!("check: not yet implemented (M3)");
+}
+
+fn run_source(src: &str) {
+    let ast = match rune_parse::parse(src) {
+        Ok(a)  => a,
+        Err(e) => { eprintln!("parse error: {}", e.message); std::process::exit(1); }
+    };
+    let formula = match rune_lower::lower(ast) {
+        Ok(n)  => n,
+        Err(e) => { eprintln!("lower error: {}", e.message); std::process::exit(1); }
+    };
+    let subject = rune_subject::Subject::minimal().to_noun();
+    match rune_interp::eval(&subject, &formula) {
+        Ok(result) => println!("{}", display_noun(&result)),
+        Err(e)     => { eprintln!("eval error: {}", e.message); std::process::exit(1); }
+    }
+}
+
+fn display_noun(noun: &rune_ast::Noun) -> String {
+    match noun {
+        rune_ast::Noun::Atom(n) => n.to_string(),
+        rune_ast::Noun::Cell(h, t) => format!("[{} {}]", display_noun(h), display_noun(t)),
+    }
+}
+
+fn print_help() {
+    println!("rune — open computation for the cybergraph");
+    println!();
+    println!("commands:");
+    println!("  run <file>    interpret a rune program");
+    println!("  eval <expr>   evaluate a single expression");
+    println!("  fmt <file>    format (--to=rust | --to=rune)  [M4]");
+    println!("  check <file>  type-check without running       [M3]");
+}

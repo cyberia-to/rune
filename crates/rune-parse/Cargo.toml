@@ -1,0 +1,12 @@
+[package]
+name = "rune-parse"
+version = "0.1.0"
+edition = "2021"
+description = "rune parser — classic (rust) register; pure (rune) register lands in M4"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rune-ast = { workspace = true }
+rune-lex = { workspace = true }

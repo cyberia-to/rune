@@ -1,0 +1,11 @@
+[package]
+name = "rune-mold"
+version = "0.1.0"
+edition = "2021"
+description = "rune mold system — types as runtime normalizing functions"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rune-ast = { workspace = true }

@@ -1,0 +1,16 @@
+[package]
+name = "rune"
+version = "0.1.0"
+edition = "2021"
+description = "rune CLI — run, eval, fmt"
+
+[[bin]]
+name = "rune"
+path = "src/main.rs"
+
+[dependencies]
+rune-ast     = { workspace = true }
+rune-parse   = { workspace = true }
+rune-lower   = { workspace = true }
+rune-interp  = { workspace = true }
+rune-subject = { workspace = true }

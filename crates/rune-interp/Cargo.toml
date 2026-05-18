@@ -1,0 +1,11 @@
+[package]
+name = "rune-interp"
+version = "0.1.0"
+edition = "2021"
+description = "rune interpreter — tree-walking Nox evaluator; instant start by construction"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rune-ast = { workspace = true }

@@ -1,0 +1,31 @@
+# ---
+# tags: rune, language, config
+# crystal-type: source
+# crystal-domain: comp
+# ---
+[workspace]
+members = [
+    "crates/rune-ast",
+    "crates/rune-lex",
+    "crates/rune-parse",
+    "crates/rune-lower",
+    "crates/rune-interp",
+    "crates/rune-subject",
+    "crates/rune-mold",
+    "crates/rune",
+]
+resolver = "3"
+
+[workspace.dependencies]
+rune-ast     = { path = "crates/rune-ast" }
+rune-lex     = { path = "crates/rune-lex" }
+rune-parse   = { path = "crates/rune-parse" }
+rune-lower   = { path = "crates/rune-lower" }
+rune-interp  = { path = "crates/rune-interp" }
+rune-subject = { path = "crates/rune-subject" }
+rune-mold    = { path = "crates/rune-mold" }
+
+# stack deps — added when compile path lands (M6)
+# nox   = { path = "../nox/rs" }
+# nebu  = { package = "cyb-nebu", path = "../strata/nebu/rs" }
+# hemera = { path = "../hemera/rs" }

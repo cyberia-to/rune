@@ -1,0 +1,8 @@
+[package]
+name = "rune-lex"
+version = "0.1.0"
+edition = "2021"
+description = "rune lexer — shared token stream for classic and pure registers"
+
+[lib]
+path = "src/lib.rs"
