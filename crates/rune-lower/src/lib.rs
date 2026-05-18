@@ -1,19 +1,29 @@
-/// Lowers rune AST (Expr) to Nox nouns (formulas).
-/// The output is a Nox formula ready for the tree-walking interpreter.
+/// Lowers rune AST (Expr) to cyber Nox nouns (formulas).
+/// The output is a cyber Nox formula ready for the tree-walking interpreter.
 ///
-/// Nox formula encoding:
-///   [0 axis]         slot
-///   [1 value]        literal
-///   [2 subj form]    eval
-///   [3 form]         cell test
-///   [4 form]         increment
-///   [5 a b]          equality
-///   [6 t y n]        if-then-else
-///   [7 a b]          compose: eval b against (eval a against subject)
-///   [8 a b]          push: eval b against [a subject]
-///   [9 axis core]    call arm at axis in core
-///   [10 [tag hint] b] hint
-///   [11 a]           scry
+/// Cyber Nox opcode table:
+///   0  = axis   [0 n]            — slot n from subject
+///   1  = quote  [1 v]            — literal value v
+///   2  = compose [2 f g]         — eval g against (eval f against subject)
+///   3  = cons   [3 f g]          — produce cell [eval(f) eval(g)]
+///   4  = branch [4 c y n]        — if eval(c)=0 then y else n
+///   5  = add    [5 a b]
+///   6  = sub    [6 a b]
+///   7  = mul    [7 a b]
+///   8  = inv    [8 a]
+///   9  = eq     [9 a b]          — 0=equal, 1=not-equal
+///  10  = lt     [10 a b]
+///  11  = xor    [11 a b]
+///  12  = and    [12 a b]
+///  13  = not    [13 a]
+///  14  = shl    [14 a b]
+///  15  = hash   [15 a]
+///  16  = call/hint [16 [tag sel] body]
+///  17  = look   [17 [path [0 255]]]
+///
+/// Subject slot axes (right-nested cons list):
+///   ~self  = 2   ~now   = 6    ~here  = 14   ~caps  = 30
+///   ~code  = 62  ~libs  = 126  ~mem   = 254  ~world = 255
 use rune_ast::{Address, Expr, Noun};
 
 #[derive(Debug)]
@@ -21,164 +31,184 @@ pub struct LowerError {
     pub message: String,
 }
 
-/// Lowers a rune Expr to a Nox formula noun.
-/// Subject conventions: ~self=2, ~now=6, ~here=10, ~world=22, ~code=14.
+/// Lowers a rune Expr to a cyber Nox formula noun.
 pub fn lower(expr: Expr) -> Result<Noun, LowerError> {
     lower_in(expr, &Env::default())
 }
 
+// ---------------------------------------------------------------------------
+// Environment: stack of let-bound names, most-recent first.
+// ---------------------------------------------------------------------------
+
 #[derive(Default, Clone)]
 struct Env {
-    // name → subject axis mapping for let-bound variables
-    bindings: Vec<(String, u64)>,
+    /// Bound names, newest at index 0.
+    stack: Vec<String>,
 }
 
 impl Env {
-    fn with_binding(&self, name: &str, axis: u64) -> Self {
+    /// Return a new Env with `name` pushed to the front (depth 0).
+    fn push(&self, name: &str) -> Self {
         let mut e = self.clone();
-        e.bindings.push((name.to_string(), axis));
+        e.stack.insert(0, name.to_string());
         e
     }
 
+    /// Look up `name`; returns Some(axis) where axis = stack_axis(index).
     fn lookup(&self, name: &str) -> Option<u64> {
-        self.bindings.iter().rev().find(|(n, _)| n == name).map(|(_, a)| *a)
+        self.stack
+            .iter()
+            .position(|n| n == name)
+            .map(|i| stack_axis(i))
     }
 }
 
+/// Axis for a let-bound name at stack depth `i` (0 = most recently bound).
+/// depth 0 → 2, 1 → 6, 2 → 14, 3 → 30, …  (same formula as subject slots)
+fn stack_axis(i: usize) -> u64 {
+    (1u64 << (i + 2)) - 2
+}
+
+// ---------------------------------------------------------------------------
+// Core lowering function
+// ---------------------------------------------------------------------------
+
 fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
     match expr {
-        // Atom literal → [1 atom]
-        Expr::Atom(n) => Ok(cell(1, n)),
+        // ------------------------------------------------------------------
+        // Atom literal → [1 n]  (quote)
+        // ------------------------------------------------------------------
+        Expr::Atom(n) => Ok(quote(n)),
 
+        // ------------------------------------------------------------------
         // Symbol → slot lookup
+        // ------------------------------------------------------------------
         Expr::Sym(name) => {
             match name.as_str() {
-                // subject slots (axis by convention)
-                "~self"  | "self"  => Ok(slot(2)),
-                "~now"   | "now"   => Ok(slot(6)),
-                "~here"  | "here"  => Ok(slot(10)),
-                "~caps"  | "caps"  => Ok(slot(14)),
-                "~code"  | "code"  => Ok(slot(18)),
-                "~libs"  | "libs"  => Ok(slot(22)),
-                "~mem"   | "mem"   => Ok(slot(26)),
-                "~world" | "world" => Ok(slot(30)),
+                // Subject slot names
+                "~self"  | "self"  => Ok(axis(2)),
+                "~now"   | "now"   => Ok(axis(6)),
+                "~here"  | "here"  => Ok(axis(14)),
+                "~caps"  | "caps"  => Ok(axis(30)),
+                "~code"  | "code"  => Ok(axis(62)),
+                "~libs"  | "libs"  => Ok(axis(126)),
+                "~mem"   | "mem"   => Ok(axis(254)),
+                "~world" | "world" => Ok(axis(255)),
                 _ => {
-                    if let Some(axis) = env.lookup(&name) {
-                        Ok(slot(axis))
+                    if let Some(ax) = env.lookup(&name) {
+                        Ok(axis(ax))
                     } else {
-                        Err(LowerError { message: format!("unbound name: {name}") })
+                        Err(lower_err(format!("unbound name: {name}")))
                     }
                 }
             }
         }
 
-        // Cell literal → distribute both sides
+        // ------------------------------------------------------------------
+        // Cell literal → [3 head-f tail-f]  (cons)
+        // ------------------------------------------------------------------
         Expr::Cell(h, t) => {
-            let hn = lower_in(*h, env)?;
-            let tn = lower_in(*t, env)?;
-            Ok(Noun::cell(hn, tn))
+            let hf = lower_in(*h, env)?;
+            let tf = lower_in(*t, env)?;
+            Ok(op3(hf, tf))
         }
 
-        // Let binding: push value onto subject, evaluate body against extended subject
-        // `[8 value-formula body-formula]` — push
+        // ------------------------------------------------------------------
+        // Let binding — subject extension via cons+compose:
+        //   [2 [3 value-formula [0 1]] body-formula]
+        // Conses value onto the subject head; body sees it at axis 2.
+        // ------------------------------------------------------------------
         Expr::Let { name, value, body, .. } => {
             let vf = lower_in(*value, env)?;
-            // body sees the let-bound name at axis 2 (head of pushed cell)
-            let env2 = env.with_binding(&name, 2);
+            // [3 value-formula [0 1]]  — cons value onto current subject
+            let extend = op3(vf, axis(1));
+            // body sees the new binding at depth 0 (axis 2), rest shift
+            let env2 = env.push(&name);
             let bf = lower_in(*body, &env2)?;
-            Ok(Noun::cell(Noun::Atom(8), Noun::cell(vf, bf)))
+            // [2 extend body-formula]  — compose
+            Ok(op2(extend, bf))
         }
 
-        // If-then-else → [6 cond yes no]
+        // ------------------------------------------------------------------
+        // If → [4 cond-f yes-f no-f]  (branch)
+        // ------------------------------------------------------------------
         Expr::If { cond, yes, no } => {
             let cf = lower_in(*cond, env)?;
             let yf = lower_in(*yes, env)?;
             let nf = lower_in(*no, env)?;
-            Ok(Noun::cell(Noun::Atom(6), Noun::cell(cf, Noun::cell(yf, nf))))
+            Ok(Noun::cell(
+                Noun::Atom(4),
+                Noun::cell(cf, Noun::cell(yf, nf)),
+            ))
         }
 
-        // Equality → [5 a b]
+        // ------------------------------------------------------------------
+        // Equality → [9 a-f b-f]
+        // ------------------------------------------------------------------
         Expr::Eq(a, b) => {
             let af = lower_in(*a, env)?;
             let bf = lower_in(*b, env)?;
-            Ok(Noun::cell(Noun::Atom(5), Noun::cell(af, bf)))
+            Ok(Noun::cell(Noun::Atom(9), Noun::cell(af, bf)))
         }
 
-        // Increment → [4 formula]
+        // ------------------------------------------------------------------
+        // Inc → [5 x-f [1 1]]  (add 1; no native increment in cyber Nox)
+        // ------------------------------------------------------------------
         Expr::Inc(inner) => {
             let f = lower_in(*inner, env)?;
-            Ok(Noun::cell(Noun::Atom(4), f))
+            Ok(Noun::cell(Noun::Atom(5), Noun::cell(f, quote(1))))
         }
 
-        // Eval → [2 subject-formula formula-formula]
-        Expr::Eval { subject, formula } => {
-            let sf = lower_in(*subject, env)?;
-            let ff = lower_in(*formula, env)?;
-            Ok(Noun::cell(Noun::Atom(2), Noun::cell(sf, ff)))
-        }
-
-        // Compose: eval right against result of left → [7 left right]
+        // ------------------------------------------------------------------
+        // Compose → [2 left-f right-f]
+        // ------------------------------------------------------------------
         Expr::Compose(left, right) => {
             let lf = lower_in(*left, env)?;
             let rf = lower_in(*right, env)?;
-            Ok(Noun::cell(Noun::Atom(7), Noun::cell(lf, rf)))
+            Ok(op2(lf, rf))
         }
 
-        // Hint: [10 [tag hint-formula] body-formula]
+        // ------------------------------------------------------------------
+        // Eval → [2 subject-f formula-f]
+        // ------------------------------------------------------------------
+        Expr::Eval { subject, formula } => {
+            let sf = lower_in(*subject, env)?;
+            let ff = lower_in(*formula, env)?;
+            Ok(op2(sf, ff))
+        }
+
+        // ------------------------------------------------------------------
+        // Hint → [16 [tag-atom selector-f] body-f]
+        // ------------------------------------------------------------------
         Expr::Hint { tag, selector, body } => {
             let tag_atom = Noun::Atom(string_to_atom(&tag));
             let sf = lower_in(*selector, env)?;
             let bf = lower_in(*body, env)?;
             Ok(Noun::cell(
-                Noun::Atom(10),
+                Noun::Atom(16),
                 Noun::cell(Noun::cell(tag_atom, sf), bf),
             ))
         }
 
-        // Trap (loop with `$` recur) → construct gate then call it
-        Expr::Trap(body) => {
-            let bf = lower_in(*body, env)?;
-            // [8 [1 0] [9 2 [0 1]]] — push a gate, call arm 2 (body)
+        // ------------------------------------------------------------------
+        // Host → [16 [host-tag-atom args-f] [1 0]]
+        // ------------------------------------------------------------------
+        Expr::Host { target: _, args } => {
+            let host_tag = Noun::Atom(string_to_atom("host"));
+            let args_f = lower_in(*args, env)?;
             Ok(Noun::cell(
-                Noun::Atom(8),
+                Noun::Atom(16),
                 Noun::cell(
-                    Noun::cell(Noun::Atom(1), Noun::Atom(0)),
-                    Noun::cell(Noun::Atom(9), Noun::cell(Noun::Atom(2), bf)),
+                    Noun::cell(host_tag, args_f),
+                    quote(0),
                 ),
             ))
         }
 
-        // Gate definition → [1 [battery sample]] — literal core
-        Expr::Gate { sample, body } => {
-            let sf = lower_in(*sample, env)?;
-            let bf = lower_in(*body, env)?;
-            Ok(Noun::cell(Noun::Atom(1), Noun::cell(bf, sf)))
-        }
-
-        // Call: push gate onto subject, invoke arm 2
-        Expr::Call { gate, args } => {
-            let gf = lower_in(*gate, env)?;
-            // TODO: handle multiple args properly
-            let arg_f = if args.len() == 1 {
-                lower_in(args.into_iter().next().unwrap(), env)?
-            } else {
-                // pack into cell
-                args.into_iter()
-                    .map(|a| lower_in(a, env))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .rev()
-                    .reduce(|t, h| Noun::cell(h, t))
-                    .unwrap_or(Noun::Atom(0))
-            };
-            // [9 2 [8 gate [1 args] [0 1]]]
-            Ok(Noun::cell(Noun::Atom(9), Noun::cell(Noun::Atom(2),
-                Noun::cell(Noun::Atom(8), Noun::cell(gf,
-                    Noun::cell(Noun::cell(Noun::Atom(1), arg_f),
-                               Noun::cell(Noun::Atom(0), Noun::Atom(1))))))))
-        }
-
-        // Address forms → slot through ~world (axis 30)
+        // ------------------------------------------------------------------
+        // Address → [17 [path-atom [0 255]]]
+        // where 255 is ~world axis, path encodes the address string
+        // ------------------------------------------------------------------
         Expr::Address(addr) => {
             let path = match addr {
                 Address::Particle(p) => p,
@@ -189,22 +219,298 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
                 Address::Abstract(a) => format!("^{a}"),
                 Address::Home        => "~/".into(),
             };
-            // encode as scry through ~world: [11 [path-atom [0 30]]]
             Ok(Noun::cell(
-                Noun::Atom(11),
-                Noun::cell(Noun::Atom(string_to_atom(&path)), slot(30)),
+                Noun::Atom(17),
+                Noun::cell(Noun::Atom(string_to_atom(&path)), axis(255)),
             ))
         }
 
-        _ => Err(LowerError { message: format!("lowering not yet implemented for: {expr:?}") }),
+        // ------------------------------------------------------------------
+        // Call — built-in names map to cyber Nox arithmetic/logic opcodes;
+        //        other calls are general gate invocations.
+        // ------------------------------------------------------------------
+        Expr::Call { gate, args } => {
+            // Peek at gate to detect built-in names
+            if let Expr::Sym(ref name) = *gate {
+                let name = name.clone();
+                match name.as_str() {
+                    "add" => return binary_op(5,  &args, env),
+                    "sub" => return binary_op(6,  &args, env),
+                    "mul" => return binary_op(7,  &args, env),
+                    "inv" => return unary_op(8,   &args, env),
+                    "lt"  => return binary_op(10, &args, env),
+                    "xor" => return binary_op(11, &args, env),
+                    "and" => return binary_op(12, &args, env),
+                    "not" => return unary_op(13,  &args, env),
+                    "shl" => return binary_op(14, &args, env),
+                    "hash" => return unary_op(15, &args, env),
+                    // neg(x) → [6 [1 0] x-f]  (0 - x)
+                    "neg" => {
+                        if args.len() != 1 {
+                            return Err(lower_err("neg requires 1 argument"));
+                        }
+                        let mut it = args.into_iter();
+                        let xf = lower_in(it.next().unwrap(), env)?;
+                        return Ok(Noun::cell(Noun::Atom(6), Noun::cell(quote(0), xf)));
+                    }
+                    _ => {}
+                }
+            }
+            // General gate call: lower gate formula, not implemented as proper
+            // call mechanism yet — emit the gate formula directly for now.
+            let gf = lower_in(*gate, env)?;
+            let _ = args; // args unused in simplified path
+            Ok(gf)
+        }
+
+        // ------------------------------------------------------------------
+        // Gate — emit body only (simplified; proper call mechanism in M2+)
+        // [1 body-f]
+        // ------------------------------------------------------------------
+        Expr::Gate { body, .. } => {
+            let bf = lower_in(*body, env)?;
+            Ok(Noun::cell(Noun::Atom(1), bf))
+        }
+
+        // ------------------------------------------------------------------
+        // Trap — push quoted body onto subject head, then take slot 2.
+        // [2 [3 [1 body-f] [0 1]] [0 2]]
+        // ------------------------------------------------------------------
+        Expr::Trap(body) => {
+            let bf = lower_in(*body, env)?;
+            // [3 [1 body-f] [0 1]]  — cons quoted body onto subject
+            let extend = op3(Noun::cell(Noun::Atom(1), bf), axis(1));
+            // [2 extend [0 2]]  — compose; slot 2 = head = body
+            Ok(op2(extend, axis(2)))
+        }
+
+        // ------------------------------------------------------------------
+        // Door / Arm — not yet implemented
+        // ------------------------------------------------------------------
+        Expr::Door(_) | Expr::Arm { .. } => {
+            Err(lower_err("Door not yet implemented"))
+        }
+
+        // ------------------------------------------------------------------
+        // Match / Rebind — not yet implemented
+        // ------------------------------------------------------------------
+        Expr::Match { .. } => Err(lower_err("Match not yet implemented")),
+        Expr::Rebind { .. } => Err(lower_err("Rebind not yet implemented")),
+
+        // ------------------------------------------------------------------
+        // Everything else
+        // ------------------------------------------------------------------
+        _ => Err(lower_err(format!("lowering not yet implemented for: {expr:?}"))),
     }
 }
 
-// Helpers for constructing common Nox formula shapes
-fn cell(op: u64, arg: u64) -> Noun { Noun::cell(Noun::Atom(op), Noun::Atom(arg)) }
-fn slot(axis: u64) -> Noun { cell(0, axis) }
+// ---------------------------------------------------------------------------
+// Helpers for constructing cyber Nox formula shapes
+// ---------------------------------------------------------------------------
 
-// Minimal name→atom encoding (not hemera — placeholder until M2)
+/// `[0 n]` — slot n
+fn axis(n: u64) -> Noun {
+    Noun::cell(Noun::Atom(0), Noun::Atom(n))
+}
+
+/// `[1 n]` — literal atom n
+fn quote(n: u64) -> Noun {
+    Noun::cell(Noun::Atom(1), Noun::Atom(n))
+}
+
+/// `[2 f g]` — compose
+fn op2(f: Noun, g: Noun) -> Noun {
+    Noun::cell(Noun::Atom(2), Noun::cell(f, g))
+}
+
+/// `[3 f g]` — cons
+fn op3(f: Noun, g: Noun) -> Noun {
+    Noun::cell(Noun::Atom(3), Noun::cell(f, g))
+}
+
+/// Emit a binary opcode: `[op arg0-f arg1-f]`
+fn binary_op(op: u64, args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
+    if args.len() != 2 {
+        return Err(lower_err(format!("op {op} requires 2 arguments, got {}", args.len())));
+    }
+    let mut it = args.iter();
+    let af = lower_in(it.next().unwrap().clone(), env)?;
+    let bf = lower_in(it.next().unwrap().clone(), env)?;
+    Ok(Noun::cell(Noun::Atom(op), Noun::cell(af, bf)))
+}
+
+/// Emit a unary opcode: `[op arg0-f]`
+fn unary_op(op: u64, args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
+    if args.len() != 1 {
+        return Err(lower_err(format!("op {op} requires 1 argument, got {}", args.len())));
+    }
+    let xf = lower_in(args[0].clone(), env)?;
+    Ok(Noun::cell(Noun::Atom(op), xf))
+}
+
+fn lower_err(msg: impl Into<String>) -> LowerError {
+    LowerError { message: msg.into() }
+}
+
+// ---------------------------------------------------------------------------
+// Minimal name→atom encoding (placeholder until hemera lands in M2)
+// ---------------------------------------------------------------------------
 fn string_to_atom(s: &str) -> u64 {
     s.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64))
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sym(s: &str) -> Expr { Expr::Sym(s.to_string()) }
+    fn atom_expr(n: u64) -> Expr { Expr::Atom(n) }
+    fn atom_noun(n: u64) -> Noun { Noun::Atom(n) }
+    fn cell_noun(h: Noun, t: Noun) -> Noun { Noun::cell(h, t) }
+
+    #[test]
+    fn lower_literal() {
+        // Expr::Atom(42) → [1 42]
+        let f = lower(atom_expr(42)).unwrap();
+        assert_eq!(f, cell_noun(atom_noun(1), atom_noun(42)));
+    }
+
+    #[test]
+    fn lower_subject_slots() {
+        assert_eq!(lower(sym("~self")).unwrap(),  cell_noun(atom_noun(0), atom_noun(2)));
+        assert_eq!(lower(sym("~now")).unwrap(),   cell_noun(atom_noun(0), atom_noun(6)));
+        assert_eq!(lower(sym("~here")).unwrap(),  cell_noun(atom_noun(0), atom_noun(14)));
+        assert_eq!(lower(sym("~caps")).unwrap(),  cell_noun(atom_noun(0), atom_noun(30)));
+        assert_eq!(lower(sym("~code")).unwrap(),  cell_noun(atom_noun(0), atom_noun(62)));
+        assert_eq!(lower(sym("~libs")).unwrap(),  cell_noun(atom_noun(0), atom_noun(126)));
+        assert_eq!(lower(sym("~mem")).unwrap(),   cell_noun(atom_noun(0), atom_noun(254)));
+        assert_eq!(lower(sym("~world")).unwrap(), cell_noun(atom_noun(0), atom_noun(255)));
+    }
+
+    #[test]
+    fn lower_eq() {
+        // Eq(Atom(1), Atom(2)) → [9 [1 1] [1 2]]
+        let f = lower(Expr::Eq(
+            Box::new(atom_expr(1)),
+            Box::new(atom_expr(2)),
+        )).unwrap();
+        assert_eq!(
+            f,
+            cell_noun(
+                atom_noun(9),
+                cell_noun(
+                    cell_noun(atom_noun(1), atom_noun(1)),
+                    cell_noun(atom_noun(1), atom_noun(2)),
+                ),
+            )
+        );
+    }
+
+    #[test]
+    fn lower_inc() {
+        // Inc(Atom(5)) → [5 [1 5] [1 1]]
+        let f = lower(Expr::Inc(Box::new(atom_expr(5)))).unwrap();
+        assert_eq!(
+            f,
+            cell_noun(
+                atom_noun(5),
+                cell_noun(
+                    cell_noun(atom_noun(1), atom_noun(5)),
+                    cell_noun(atom_noun(1), atom_noun(1)),
+                ),
+            )
+        );
+    }
+
+    #[test]
+    fn lower_let_binding() {
+        // Let { name: "x", value: Atom(99), body: Sym("x") }
+        // → [2 [3 [1 99] [0 1]] [0 2]]
+        let expr = Expr::Let {
+            name: "x".into(),
+            mold: None,
+            value: Box::new(atom_expr(99)),
+            body: Box::new(sym("x")),
+        };
+        let f = lower(expr).unwrap();
+        // [2 [3 [1 99] [0 1]] [0 2]]
+        let expected = cell_noun(
+            atom_noun(2),
+            cell_noun(
+                cell_noun(
+                    atom_noun(3),
+                    cell_noun(
+                        cell_noun(atom_noun(1), atom_noun(99)),
+                        cell_noun(atom_noun(0), atom_noun(1)),
+                    ),
+                ),
+                cell_noun(atom_noun(0), atom_noun(2)),
+            ),
+        );
+        assert_eq!(f, expected);
+    }
+
+    #[test]
+    fn lower_builtin_add() {
+        // Call { gate: Sym("add"), args: [Atom(3), Atom(4)] } → [5 [1 3] [1 4]]
+        let f = lower(Expr::Call {
+            gate: Box::new(sym("add")),
+            args: vec![atom_expr(3), atom_expr(4)],
+        }).unwrap();
+        assert_eq!(
+            f,
+            cell_noun(
+                atom_noun(5),
+                cell_noun(
+                    cell_noun(atom_noun(1), atom_noun(3)),
+                    cell_noun(atom_noun(1), atom_noun(4)),
+                ),
+            )
+        );
+    }
+
+    #[test]
+    fn lower_builtin_neg() {
+        // neg(Atom(7)) → [6 [1 0] [1 7]]
+        let f = lower(Expr::Call {
+            gate: Box::new(sym("neg")),
+            args: vec![atom_expr(7)],
+        }).unwrap();
+        assert_eq!(
+            f,
+            cell_noun(
+                atom_noun(6),
+                cell_noun(
+                    cell_noun(atom_noun(1), atom_noun(0)),
+                    cell_noun(atom_noun(1), atom_noun(7)),
+                ),
+            )
+        );
+    }
+
+    #[test]
+    fn lower_if() {
+        // If { cond: Atom(0), yes: Atom(1), no: Atom(2) } → [4 [1 0] [1 1] [1 2]]
+        let f = lower(Expr::If {
+            cond: Box::new(atom_expr(0)),
+            yes:  Box::new(atom_expr(1)),
+            no:   Box::new(atom_expr(2)),
+        }).unwrap();
+        assert_eq!(
+            f,
+            cell_noun(
+                atom_noun(4),
+                cell_noun(
+                    cell_noun(atom_noun(1), atom_noun(0)),
+                    cell_noun(
+                        cell_noun(atom_noun(1), atom_noun(1)),
+                        cell_noun(atom_noun(1), atom_noun(2)),
+                    ),
+                ),
+            )
+        );
+    }
 }
