@@ -132,6 +132,16 @@ impl<'src> Lexer<'src> {
             '&' => { self.advance(); Token::Amp }
             '%' => { self.advance(); Token::Percent }
             '*' => { self.advance(); Token::Star }
+            '<' => {
+                self.advance();
+                if self.peek() == Some('=') { self.advance(); Token::Ident("<=".into()) }
+                else { Token::Ident("<".into()) }
+            }
+            '>' => {
+                self.advance();
+                if self.peek() == Some('=') { self.advance(); Token::Ident(">=".into()) }
+                else { Token::Ident(">".into()) }
+            }
             '"' => self.lex_str(),
             '0'..='9' => self.lex_number(),
             'a'..='z' | 'A'..='Z' | '_' => self.lex_ident(),

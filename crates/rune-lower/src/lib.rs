@@ -440,16 +440,25 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         // ------------------------------------------------------------------
         // Loop (recur) — tail-call back to the enclosing Trap.
         //
-        // The trap subject is [body_f  outer_subj]; body_f is at axis 2.
-        // [2 [0 1] [0 2]]:
-        //   new_subj = eval([0 1], s) = s  (identity — keep current subject)
-        //   new_form = eval([0 2], s) = body_f (slot 2 of trap subject)
-        //   → restarts body_f from the top with whatever subject was current
-        //     (which rebind may have mutated in-place).
+        // `$` may not be at axis 2 when inner `let` bindings inside the trap
+        // body have extended the subject.  Look up `$` dynamically:
+        //   body_f_axis  = stack_axis(depth_of_$)  = where body_f lives now
+        //   trap_subj_axis = body_f_axis / 2        = the trap subject itself
+        //
+        // [2 [0 trap_subj_axis] [0 body_f_axis]]:
+        //   new_subj = trap subject (strips any inner let extensions)
+        //   new_form = body_f (head of trap subject)
+        //   → restarts body_f against the clean trap subject
+        //
+        // Special case: no inner lets → body_f_axis=2, trap_subj_axis=1
+        //   → [2 [0 1] [0 2]] (same as before, unchanged for existing tests).
         // ------------------------------------------------------------------
         Expr::Loop => {
             if env.in_trap {
-                Ok(op2(axis(1), axis(2)))
+                let body_f_axis = env.lookup("$")
+                    .ok_or_else(|| lower_err("internal: '$' missing from trap env"))?;
+                let trap_subj_axis = body_f_axis / 2;
+                Ok(op2(axis(trap_subj_axis), axis(body_f_axis)))
             } else {
                 Err(lower_err("recur ($) outside trap"))
             }

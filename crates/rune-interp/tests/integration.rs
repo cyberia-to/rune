@@ -64,3 +64,57 @@ fn closure_captures_outer_var() {
     // Let x = 10, let add_x = fn(y) { x + y }, add_x(5) → 15
     assert_eq!(run("let x = 10; let add_x = fn(y) { x + y }; add_x(5)"), 15);
 }
+
+#[test]
+fn double_function() {
+    assert_eq!(run("let double = fn(x) { x * 2 }; double(5)"), 10);
+}
+
+#[test]
+fn fibonacci_10() {
+    // Iterative fibonacci using trap+rebind+loop.
+    // fib(10) = 55
+    let src = r#"
+let fib = fn(n) {
+    let a = 0;
+    let b = 1;
+    let i = 0;
+    loop {
+        if i == n {
+            a
+        } else {
+            let next_b = a + b;
+            rebind a = b;
+            rebind b = next_b;
+            rebind i = i + 1;
+            continue
+        }
+    }
+};
+fib(10)
+"#;
+    assert_eq!(run(src), 55);
+}
+
+#[test]
+fn factorial_5() {
+    // Iterative factorial using trap+rebind+loop.
+    // factorial(5) = 120
+    let src = r#"
+let factorial = fn(n) {
+    let acc = 1;
+    let i = 1;
+    loop {
+        if i > n {
+            acc
+        } else {
+            rebind acc = acc * i;
+            rebind i = i + 1;
+            continue
+        }
+    }
+};
+factorial(5)
+"#;
+    assert_eq!(run(src), 120);
+}
