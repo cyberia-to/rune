@@ -9,10 +9,11 @@ name = "rune"
 path = "src/main.rs"
 
 [dependencies]
-rune-ast     = { workspace = true }
-rune-parse   = { workspace = true }
-rune-lower   = { workspace = true }
-rune-interp  = { workspace = true }
-rune-subject = { workspace = true }
-rune-mold    = { workspace = true }
-rune-compile = { workspace = true }
+rune-ast        = { workspace = true }
+rune-parse      = { workspace = true }
+rune-parse-pure = { workspace = true }
+rune-lower      = { workspace = true }
+rune-interp     = { workspace = true }
+rune-subject    = { workspace = true }
+rune-mold       = { workspace = true }
+rune-compile    = { workspace = true }

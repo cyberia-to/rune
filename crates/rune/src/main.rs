@@ -1,10 +1,11 @@
 /// rune CLI
 ///
 /// Commands:
-///   rune run <file>         parse, lower, and interpret a rune program
-///   rune eval <expr>        evaluate a single expression (REPL-style)
-///   rune fmt <file>         format source (--to=rust | --to=rune)
-///   rune check <file>       type-check without running
+///   rune run <file>              parse, lower, and interpret a rune program
+///   rune eval <expr>             evaluate a single expression
+///   rune fmt [--to=rust|--to=rune] <file>   format source
+///   rune check <file>            type-check without running
+use rune_parse_pure;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -33,33 +34,30 @@ fn cmd_eval(args: &[String]) {
 }
 
 fn cmd_fmt(args: &[String]) {
-    let (path, to_rune) = if args.first().map(String::as_str) == Some("--to=rune") {
-        (args.get(1), true)
+    let (target, file) = if args.first().map(String::as_str) == Some("--to=rune") {
+        ("rune", args.get(1))
+    } else if args.first().map(String::as_str) == Some("--to=rust") {
+        ("rust", args.get(1))
     } else {
-        (args.first(), false)
+        ("rust", args.first())
     };
-
-    let path = path.unwrap_or_else(|| {
+    let path = file.unwrap_or_else(|| {
         eprintln!("usage: rune fmt [--to=rust|--to=rune] <file>");
         std::process::exit(1);
     });
-
-    if to_rune {
-        println!("(pure register fmt coming in M4)");
-        return;
-    }
-
     let src = std::fs::read_to_string(path).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(1);
     });
-
     let ast = match rune_parse::parse(&src) {
         Ok(a)  => a,
         Err(e) => { eprintln!("parse error: {}", e.message); std::process::exit(1); }
     };
-
-    println!("{}", rune_parse::format_expr(&ast));
+    if target == "rune" {
+        println!("{}", rune_parse_pure::format_expr(&ast));
+    } else {
+        println!("{}", rune_parse::format_expr(&ast));
+    }
 }
 
 fn cmd_check(args: &[String]) {

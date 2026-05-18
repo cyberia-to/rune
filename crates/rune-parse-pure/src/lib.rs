@@ -612,8 +612,14 @@ pub fn format_expr(expr: &Expr) -> String {
             format!("=/  {}\n{}\n{}", name, format_expr(value), format_expr(body)),
         Expr::If { cond, yes, no } =>
             format!("?:  {}\n{}\n{}", format_expr(cond), format_expr(yes), format_expr(no)),
-        Expr::Gate { sample, body } =>
-            format!("|=  {}\n{}", format_expr(sample), format_expr(body)),
+        Expr::Gate { sample, body } => {
+            let sample_str = match sample.as_ref() {
+                Expr::Sym(s) if s.starts_with("param:") => s["param:".len()..].replace(';', " "),
+                Expr::Atom(0) => "~".into(),
+                _ => format_expr(sample),
+            };
+            format!("|=  {}\n{}", sample_str, format_expr(body))
+        }
         Expr::Call { gate: gate_expr, args } => {
             if let Expr::Sym(op) = gate_expr.as_ref() {
                 match op.as_str() {
@@ -663,6 +669,11 @@ pub fn format_expr(expr: &Expr) -> String {
                 .collect::<Vec<_>>()
                 .join("\n");
             format!("(?- {}\n{})", format_expr(subject), arm_strs)
+        }
+        Expr::Loop => "$".into(),
+        Expr::MethodCall { obj, method, args } => {
+            let joined = args.iter().map(format_expr).collect::<Vec<_>>().join(" ");
+            format!("({obj}-{method} {joined})")
         }
         Expr::Address(a) => format!("{a:?}"),
         _ => format!("{expr:?}"),
