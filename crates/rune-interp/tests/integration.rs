@@ -48,3 +48,19 @@ fn if_zero_eq_zero_takes_yes() {
     // `if 0 == 0 { 1 } else { 2 }` — cond is 0==0 → eq returns 0 (equal) → branch takes yes
     assert_eq!(run("if 0 == 0 { 1 } else { 2 }"), 1);
 }
+
+#[test]
+fn gate_call_single_arg() {
+    assert_eq!(run("let double = fn(x) { x * 2 }; double(5)"), 10);
+}
+
+#[test]
+fn gate_call_two_args() {
+    assert_eq!(run("let add_pair = fn(x, y) { x + y }; add_pair(3, 4)"), 7);
+}
+
+#[test]
+fn closure_captures_outer_var() {
+    // Let x = 10, let add_x = fn(y) { x + y }, add_x(5) → 15
+    assert_eq!(run("let x = 10; let add_x = fn(y) { x + y }; add_x(5)"), 15);
+}

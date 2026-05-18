@@ -41,8 +41,32 @@ impl Parser {
             Token::Pat    => self.parse_address_neuron(),
             Token::Sig    => self.parse_address_name(),
             Token::Ket    => self.parse_address_abstract(),
+            Token::Ident(ref s) if s == "match" => self.parse_match(),
+            Token::Ident(ref s) if s == "continue" => { self.advance(); Ok(Expr::Loop) }
             _             => self.parse_binop(0),
         }
+    }
+
+    fn parse_match(&mut self) -> Result<Expr, ParseError> {
+        // consume "match" (lexes as Token::Ident("match"))
+        self.advance();
+        let subject = self.parse_expr()?;
+        self.expect(Token::LBrace)?;
+        self.skip_newlines();
+        let mut arms: Vec<(Expr, Expr)> = Vec::new();
+        while !matches!(self.peek(), Token::RBrace | Token::Eof) {
+            let pat = self.parse_expr()?;
+            self.expect(Token::FatArrow)?;
+            let body = self.parse_expr()?;
+            arms.push((pat, body));
+            // optional comma or semicolon separator
+            if matches!(self.peek(), Token::Comma | Token::Semi) {
+                self.advance();
+            }
+            self.skip_newlines();
+        }
+        self.expect(Token::RBrace)?;
+        Ok(Expr::Match { subject: Box::new(subject), arms })
     }
 
     /// Pratt-style binary operator parsing.
@@ -409,6 +433,13 @@ pub fn format_expr(expr: &rune_ast::Expr) -> String {
         Expr::Inc(x) => format!("{} + 1", format_expr(x)),
         Expr::Trap(body) => format!("loop {{ {} }}", format_expr(body)),
         Expr::Address(a) => format!("{a:?}"),
+        Expr::Match { subject, arms } => {
+            let arms_str: Vec<String> = arms.iter()
+                .map(|(p, b)| format!("{} => {}", format_expr(p), format_expr(b)))
+                .collect();
+            format!("match {} {{ {} }}", format_expr(subject), arms_str.join(", "))
+        }
+        Expr::Loop => "$".to_string(),
         _ => format!("{expr:?}"),
     }
 }
@@ -495,5 +526,55 @@ mod tests {
             }
             _ => panic!("expected Gate"),
         }
+    }
+
+    #[test]
+    fn parse_match_stmt() {
+        let e = parse("match x { 0 => 1, 1 => 2 }").unwrap();
+        match e {
+            Expr::Match { subject, arms } => {
+                assert!(matches!(*subject, Expr::Sym(_)));
+                assert_eq!(arms.len(), 2);
+                assert!(matches!(arms[0].0, Expr::Atom(0)));
+                assert!(matches!(arms[0].1, Expr::Atom(1)));
+                assert!(matches!(arms[1].0, Expr::Atom(1)));
+                assert!(matches!(arms[1].1, Expr::Atom(2)));
+            }
+            _ => panic!("expected Match"),
+        }
+    }
+
+    #[test]
+    fn parse_match_no_trailing_comma() {
+        let e = parse("match x { 0 => 1 }").unwrap();
+        match e {
+            Expr::Match { subject, arms } => {
+                assert!(matches!(*subject, Expr::Sym(_)));
+                assert_eq!(arms.len(), 1);
+            }
+            _ => panic!("expected Match"),
+        }
+    }
+
+    #[test]
+    fn parse_match_format() {
+        let e = parse("match x { 0 => 1, 1 => 2 }").unwrap();
+        let s = format_expr(&e);
+        assert!(s.starts_with("match x {"));
+        assert!(s.contains("0 => 1"));
+        assert!(s.contains("1 => 2"));
+    }
+
+    #[test]
+    fn parse_continue_keyword() {
+        let e = parse("continue").unwrap();
+        assert!(matches!(e, Expr::Loop));
+    }
+
+    #[test]
+    fn parse_continue_in_loop_body() {
+        // loop { if x == 0 { continue } else { x } }
+        let e = parse("loop { if x == 0 { continue } else { x } }").unwrap();
+        assert!(matches!(e, Expr::Trap(_)));
     }
 }

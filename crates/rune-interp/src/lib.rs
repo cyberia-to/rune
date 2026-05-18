@@ -27,9 +27,9 @@
 ///   [14 a n]      shl: eval_a << eval_n
 ///
 /// Hash + async stubs (3):
-///   [15 a]        hash: stub — return eval_a (real hemera hash in M2)
-///   [16 tag args] call: stub for async event injection — return Atom(0) (M5)
-///   [17 path]     look: stub for graph scry — return Atom(0) (M2)
+///   [15 a]              hash: stub — return eval_a (real hemera hash in M2)
+///   [16 [tag sel] body] hint/call: evaluate body; tag/selector are reactive metadata (M5)
+///   [17 path]           look: stub for graph scry — return Atom(0) (M2)
 ///
 /// Distribution rule: when formula is [f1 f2] where f1 is itself a cell
 /// (not an atom opcode prefix), eval both sides against subject and return
@@ -189,9 +189,12 @@ pub fn eval(subject: &Noun, formula: &Noun) -> Result<Noun, InterpError> {
                     return Ok(r);
                 }
 
-                // 16 — call/hint: stub for async event injection (M5)
+                // 16 — call/hint: evaluate body (tag/selector are reactive metadata, ignored at M5)
                 Noun::Atom(16) => {
-                    return Ok(Noun::Atom(0));
+                    // rest = [[tag selector] body]
+                    let (_hint_meta, body) = pair(rest)?;
+                    form = body;
+                    continue; // tail-call: eval body against current subject
                 }
 
                 // 17 — look: stub for graph scry (M2)
@@ -598,11 +601,35 @@ mod tests {
         assert_eq!(eval(&a(0), &formula).unwrap(), a(55));
     }
 
-    // ── pattern 16: call stub ─────────────────────────────────────────────────
+    // ── pattern 16: hint/call ─────────────────────────────────────────────────
 
     #[test]
-    fn call_stub_returns_zero() {
-        let formula = c(a(16), c(a(1), a(0)));
+    fn hint_evaluates_body() {
+        // [16 [[1 42] [1 0]] [1 99]] → evaluate body [1 99] → 99
+        // Format: [16 [tag selector] body] where tag=[1 42], selector=[1 0], body=[1 99]
+        let tag = c(a(1), a(42));
+        let selector = c(a(1), a(0));
+        let hint_meta = c(tag, selector);
+        let body = c(a(1), a(99));
+        let formula = c(a(16), c(hint_meta, body));
+        assert_eq!(eval(&a(0), &formula).unwrap(), a(99));
+    }
+
+    #[test]
+    fn hint_evaluates_arithmetic_body() {
+        // [16 [[1 0] [1 0]] [5 [1 3] [1 4]]] → eval [5 [1 3] [1 4]] → add(3,4) = 7
+        let hint_meta = c(c(a(1), a(0)), c(a(1), a(0)));
+        let body = c(a(5), c(c(a(1), a(3)), c(a(1), a(4))));
+        let formula = c(a(16), c(hint_meta, body));
+        assert_eq!(eval(&a(0), &formula).unwrap(), a(7));
+    }
+
+    #[test]
+    fn host_call_returns_zero() {
+        // [16 [[1 host-tag] args] [1 0]] → body = [1 0] → 0
+        let hint_meta = c(c(a(1), a(99)), c(a(1), a(0)));
+        let body = c(a(1), a(0)); // [1 0] = quoted zero
+        let formula = c(a(16), c(hint_meta, body));
         assert_eq!(eval(&a(0), &formula).unwrap(), a(0));
     }
 

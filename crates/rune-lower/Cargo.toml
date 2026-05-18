@@ -9,3 +9,6 @@ path = "src/lib.rs"
 
 [dependencies]
 rune-ast = { workspace = true }
+
+[dev-dependencies]
+rune-interp = { workspace = true }

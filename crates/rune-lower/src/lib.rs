@@ -37,13 +37,29 @@ pub fn lower(expr: Expr) -> Result<Noun, LowerError> {
 }
 
 // ---------------------------------------------------------------------------
-// Environment: stack of let-bound names, most-recent first.
+// Environment: stack of let-bound names, most-recent first, plus gate defs.
 // ---------------------------------------------------------------------------
+
+/// A gate definition stored for call-site inlining.
+///
+/// The body is stored as an *uncompiled* Expr so it can be re-compiled at
+/// every call site with the full call-site environment.  This is required for
+/// closures: a gate that captures an outer variable must re-resolve the
+/// captured name against whichever subject is current at the call site.
+#[derive(Clone)]
+struct GateDef {
+    name: String,
+    params: Vec<String>,
+    /// Uncompiled body — compiled fresh at each call site.
+    body_expr: Expr,
+}
 
 #[derive(Default, Clone)]
 struct Env {
     /// Bound names, newest at index 0.
     stack: Vec<String>,
+    /// Known gate definitions, for inlining at call sites.
+    gates: Vec<GateDef>,
 }
 
 impl Env {
@@ -54,6 +70,13 @@ impl Env {
         e
     }
 
+    /// Push `name` as a stack binding AND record a gate definition for inlining.
+    fn push_gate(&self, name: &str, params: Vec<String>, body_expr: Expr) -> Self {
+        let mut e = self.push(name);
+        e.gates.push(GateDef { name: name.to_string(), params, body_expr });
+        e
+    }
+
     /// Look up `name`; returns Some(axis) where axis = stack_axis(index).
     fn lookup(&self, name: &str) -> Option<u64> {
         self.stack
@@ -61,12 +84,42 @@ impl Env {
             .position(|n| n == name)
             .map(|i| stack_axis(i))
     }
+
+    /// Find a gate definition by name (last one wins).
+    fn find_gate(&self, name: &str) -> Option<GateDef> {
+        self.gates.iter().rev().find(|g| g.name == name).cloned()
+    }
 }
 
 /// Axis for a let-bound name at stack depth `i` (0 = most recently bound).
 /// depth 0 → 2, 1 → 6, 2 → 14, 3 → 30, …  (same formula as subject slots)
 fn stack_axis(i: usize) -> u64 {
     (1u64 << (i + 2)) - 2
+}
+
+// ---------------------------------------------------------------------------
+// Param extraction from a Gate sample expression
+// ---------------------------------------------------------------------------
+
+/// Extract parameter names from a gate sample expression.
+///
+/// Conventions understood:
+///   - `Expr::Sym("param:x;y")` → `["x", "y"]`   (semicolon-separated list)
+///   - `Expr::Sym(s)` (any other symbol)           → `[s]`    (single param)
+///   - `Expr::Atom(0)`                             → `[]`     (no-arg gate)
+fn extract_params(sample: &Expr) -> Vec<String> {
+    match sample {
+        Expr::Atom(0) => vec![],
+        Expr::Sym(s) if s.starts_with("param:") => {
+            s["param:".len()..]
+                .split(';')
+                .filter(|p| !p.is_empty())
+                .map(|p| p.to_string())
+                .collect()
+        }
+        Expr::Sym(s) => vec![s.clone()],
+        _ => vec![],
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -117,23 +170,43 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         // Let binding — subject extension via cons+compose:
         //   [2 [3 value-formula [0 1]] [1 body-formula]]
         //
-        // compose evaluates both arms against the original subject:
-        //   new_subj = eval(s, [3 val-f [0 1]])  = [val, s]
-        //   new_form = eval(s, [1 body-f])        = body-f   (literal)
-        //   eval(new_subj, new_form)               = eval([val, s], body-f)
-        //
-        // body-f uses axis 2 for the newly bound name, deeper axes for outer
-        // variables (already adjusted by env.push).
+        // Special case: when the bound value is a Gate, store the uncompiled
+        // body expr in the env for call-site inlining (so closures resolve
+        // captured variables against the correct call-site subject).
         // ------------------------------------------------------------------
         Expr::Let { name, value, body, .. } => {
-            let vf = lower_in(*value, env)?;
-            // [3 value-formula [0 1]]  — cons value onto current subject
+            let is_gate = matches!(*value, Expr::Gate { .. });
+
+            let (vf, env2) = if is_gate {
+                // Destructure the Gate variant
+                let (sample, gate_body) = match *value {
+                    Expr::Gate { sample, body: gb } => (sample, gb),
+                    _ => unreachable!(),
+                };
+
+                let params = extract_params(&sample);
+
+                // Emit a quoted placeholder as the runtime value for the let
+                // slot.  All call sites are inlined so this slot is never
+                // actually evaluated; it exists only to keep the subject layout
+                // correct (env.push ensures existing axes shift by one).
+                let placeholder = quote(0);
+
+                // Store the raw (uncompiled) body so it can be compiled fresh
+                // at each call site against the call-site env.
+                let env2 = env.push_gate(&name, params, *gate_body);
+                (placeholder, env2)
+            } else {
+                let vf = lower_in(*value, env)?;
+                let env2 = env.push(&name);
+                (vf, env2)
+            };
+
+            // [3 vf [0 1]]  — cons value onto current subject
             let extend = op3(vf, axis(1));
             // body sees the new binding at depth 0 (axis 2), rest shift
-            let env2 = env.push(&name);
             let bf = lower_in(*body, &env2)?;
-            // [2 extend [1 body-formula]]  — quote the body so compose uses it
-            // as the new formula rather than evaluating it against original subject
+            // [2 extend [1 bf]]
             let quoted_body = Noun::cell(Noun::Atom(1), bf);
             Ok(op2(extend, quoted_body))
         }
@@ -236,23 +309,33 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
 
         // ------------------------------------------------------------------
         // Call — built-in names map to cyber Nox arithmetic/logic opcodes;
-        //        other calls are general gate invocations.
+        //        user-defined gate names are inlined if a body is known.
+        //
+        // Gate call inlining (N params, N args):
+        //   - Build args chain: [3 a1-f [3 a2-f [... [0 1]]]]
+        //     → new_subj = [a1 [a2 ... call_site_subj]]
+        //   - Compile gate body against call-site env with params pushed
+        //     in REVERSE order (so param[0] → axis 2, param[1] → axis 6 …)
+        //   - Emit: [2 chain [1 body-f]]
+        //
+        // By compiling the body at the call site (not the definition site),
+        // captured outer variables resolve to the correct axes in call_site_subj.
         // ------------------------------------------------------------------
         Expr::Call { gate, args } => {
-            // Peek at gate to detect built-in names
+            // Peek at gate to detect built-in or known gate names
             if let Expr::Sym(ref name) = *gate {
-                let name = name.clone();
-                match name.as_str() {
-                    "add" => return binary_op(5,  &args, env),
-                    "sub" => return binary_op(6,  &args, env),
-                    "mul" => return binary_op(7,  &args, env),
-                    "inv" => return unary_op(8,   &args, env),
-                    "lt"  => return binary_op(10, &args, env),
-                    "xor" => return binary_op(11, &args, env),
-                    "and" => return binary_op(12, &args, env),
-                    "not" => return unary_op(13,  &args, env),
-                    "shl" => return binary_op(14, &args, env),
-                    "hash" => return unary_op(15, &args, env),
+                let name_str = name.clone();
+                match name_str.as_str() {
+                    "add"  => return binary_op(5,  &args, env),
+                    "sub"  => return binary_op(6,  &args, env),
+                    "mul"  => return binary_op(7,  &args, env),
+                    "inv"  => return unary_op(8,   &args, env),
+                    "lt"   => return binary_op(10, &args, env),
+                    "xor"  => return binary_op(11, &args, env),
+                    "and"  => return binary_op(12, &args, env),
+                    "not"  => return unary_op(13,  &args, env),
+                    "shl"  => return binary_op(14, &args, env),
+                    "hash" => return unary_op(15,  &args, env),
                     // neg(x) → [6 [1 0] x-f]  (0 - x)
                     "neg" => {
                         if args.len() != 1 {
@@ -262,35 +345,127 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
                         let xf = lower_in(it.next().unwrap(), env)?;
                         return Ok(Noun::cell(Noun::Atom(6), Noun::cell(quote(0), xf)));
                     }
+                    // gt(a, b) → [10 b-f a-f]  (lt with args swapped: a > b ≡ lt(b,a))
+                    "gt" => {
+                        if args.len() != 2 {
+                            return Err(lower_err("gt requires 2 arguments"));
+                        }
+                        let mut it = args.into_iter();
+                        let af = lower_in(it.next().unwrap(), env)?;
+                        let bf = lower_in(it.next().unwrap(), env)?;
+                        return Ok(Noun::cell(Noun::Atom(10), Noun::cell(bf, af)));
+                    }
                     _ => {}
                 }
+
+                // Check for an inlineable user-defined gate.
+                // Compile the body fresh here, using the call-site env extended
+                // with params, so that captured variables resolve correctly.
+                if let Some(gdef) = env.find_gate(&name_str) {
+                    if args.len() != gdef.params.len() {
+                        return Err(lower_err(format!(
+                            "gate '{}' takes {} args, got {}",
+                            name_str, gdef.params.len(), args.len()
+                        )));
+                    }
+
+                    // Build body env: push params in reverse order onto the
+                    // call-site env.  After the call cons [a1 [a2 ... subj]],
+                    // param[0]=a1 → axis 2, param[1]=a2 → axis 6, …
+                    let mut call_body_env = env.clone();
+                    for p in gdef.params.iter().rev() {
+                        call_body_env = call_body_env.push(p);
+                    }
+                    let body_f = lower_in(gdef.body_expr, &call_body_env)?;
+
+                    // Build args chain: [3 a1-f [3 a2-f [... [0 1]]]]
+                    // Fold right so a1 is the outermost (head after cons).
+                    let mut chain = axis(1); // [0 1] — tail = call_site_subj
+                    for arg in args.into_iter().rev() {
+                        let af = lower_in(arg, env)?;
+                        chain = op3(af, chain);
+                    }
+                    let quoted_body = Noun::cell(Noun::Atom(1), body_f);
+                    return Ok(op2(chain, quoted_body));
+                }
             }
-            // General gate call: lower gate formula, not implemented as proper
-            // call mechanism yet — emit the gate formula directly for now.
+
+            // General gate call: lower gate formula.
+            // Args are ignored in the simplified (non-inlined) path.
             let gf = lower_in(*gate, env)?;
-            let _ = args; // args unused in simplified path
+            let _ = args;
             Ok(gf)
         }
 
         // ------------------------------------------------------------------
-        // Gate — emit body only (simplified; proper call mechanism in M2+)
-        // [1 body-f]
+        // Gate — emit quoted body (used when a gate appears as a value
+        // outside of a Let binding, e.g. passed as a first-class value).
         // ------------------------------------------------------------------
-        Expr::Gate { body, .. } => {
-            let bf = lower_in(*body, env)?;
+        Expr::Gate { sample, body } => {
+            let params = extract_params(&sample);
+            let mut body_env = env.clone();
+            for p in params.iter().rev() {
+                body_env = body_env.push(p);
+            }
+            let bf = lower_in(*body, &body_env)?;
             Ok(Noun::cell(Noun::Atom(1), bf))
         }
 
         // ------------------------------------------------------------------
-        // Trap — push quoted body onto subject head, then take slot 2.
-        // [2 [3 [1 body-f] [0 1]] [0 2]]
+        // Trap — execute body once.
+        // Full tail-recursive recur ($ syntax) is not yet implemented.
         // ------------------------------------------------------------------
         Expr::Trap(body) => {
-            let bf = lower_in(*body, env)?;
-            // [3 [1 body-f] [0 1]]  — cons quoted body onto subject
-            let extend = op3(Noun::cell(Noun::Atom(1), bf), axis(1));
-            // [2 extend [0 2]]  — compose; slot 2 = head = body
-            Ok(op2(extend, axis(2)))
+            lower_in(*body, env)
+        }
+
+        // ------------------------------------------------------------------
+        // Loop (recur) — not yet implemented
+        // ------------------------------------------------------------------
+        Expr::Loop => Err(lower_err("loop recur ($) not yet implemented")),
+
+        // ------------------------------------------------------------------
+        // Match — pattern switch with equality arms.
+        //
+        // Wraps the subject in a let so it is evaluated once:
+        //   [2 [3 sf [0 1]] [1 nested-branch-f]]
+        // Inside, subject is at axis 2 ($match).  Arms are tested in order;
+        // a non-exhaustive match falls through to atom 0.
+        // ------------------------------------------------------------------
+        Expr::Match { subject, arms } => {
+            if arms.is_empty() {
+                return Err(lower_err("match with no arms"));
+            }
+
+            let sf = lower_in(*subject, env)?;
+
+            // Compile arms against an env where the matched subject is at depth 0
+            let inner_env = env.push("$match");
+            let subject_access = axis(2); // slot 2 = head = matched subject value
+
+            // Build branch chain from last arm to first (fold right).
+            // Non-exhaustive fallthrough: literal 0.
+            let mut chain_noun: Noun = quote(0);
+
+            for (pat, arm_body) in arms.into_iter().rev() {
+                let pf = lower_in(pat, &inner_env)?;
+                let bf = lower_in(arm_body, &inner_env)?;
+                // eq test: [9 subject_access pf]  →  0 if equal
+                let test = Noun::cell(
+                    Noun::Atom(9),
+                    Noun::cell(subject_access.clone(), pf),
+                );
+                // branch: if eq=0 (equal), take bf, else continue with chain
+                chain_noun = Noun::cell(
+                    Noun::Atom(4),
+                    Noun::cell(test, Noun::cell(bf, chain_noun)),
+                );
+            }
+
+            // Wrap: cons subject onto current subject to extend, then eval chain
+            let extend = op3(sf, axis(1));
+            let quoted_chain = Noun::cell(Noun::Atom(1), chain_noun);
+            Ok(op2(extend, quoted_chain))
         }
 
         // ------------------------------------------------------------------
@@ -301,9 +476,8 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         }
 
         // ------------------------------------------------------------------
-        // Match / Rebind — not yet implemented
+        // Rebind — not yet implemented
         // ------------------------------------------------------------------
-        Expr::Match { .. } => Err(lower_err("Match not yet implemented")),
         Expr::Rebind { .. } => Err(lower_err("Rebind not yet implemented")),
 
         // ------------------------------------------------------------------
@@ -522,5 +696,67 @@ mod tests {
                 ),
             )
         );
+    }
+
+    // ------------------------------------------------------------------
+    // Gate call tests (unit — no parser needed, build AST directly)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn lower_gate_single_arg_call() {
+        // let double = fn(x) { x * 2 }; double(5)  → 10
+        let expr = Expr::Let {
+            name: "double".into(),
+            mold: None,
+            value: Box::new(Expr::Gate {
+                sample: Box::new(Expr::Sym("param:x".into())),
+                body: Box::new(Expr::Call {
+                    gate: Box::new(Expr::Sym("mul".into())),
+                    args: vec![Expr::Sym("x".into()), Expr::Atom(2)],
+                }),
+            }),
+            body: Box::new(Expr::Call {
+                gate: Box::new(Expr::Sym("double".into())),
+                args: vec![Expr::Atom(5)],
+            }),
+        };
+        let f = lower(expr).unwrap();
+        let result = rune_interp::eval(&Noun::Atom(0), &f).unwrap();
+        assert_eq!(result, Noun::Atom(10));
+    }
+
+    #[test]
+    fn lower_gate_two_arg_call() {
+        // let add_pair = fn(x, y) { x + y }; add_pair(3, 4)  → 7
+        let expr = Expr::Let {
+            name: "add_pair".into(),
+            mold: None,
+            value: Box::new(Expr::Gate {
+                sample: Box::new(Expr::Sym("param:x;y".into())),
+                body: Box::new(Expr::Call {
+                    gate: Box::new(Expr::Sym("add".into())),
+                    args: vec![Expr::Sym("x".into()), Expr::Sym("y".into())],
+                }),
+            }),
+            body: Box::new(Expr::Call {
+                gate: Box::new(Expr::Sym("add_pair".into())),
+                args: vec![Expr::Atom(3), Expr::Atom(4)],
+            }),
+        };
+        let f = lower(expr).unwrap();
+        let result = rune_interp::eval(&Noun::Atom(0), &f).unwrap();
+        assert_eq!(result, Noun::Atom(7));
+    }
+
+    #[test]
+    fn lower_gt() {
+        // gt(7, 3) → 0  (7 > 3 is true → 0 in Nox truth convention)
+        let expr = Expr::Call {
+            gate: Box::new(sym("gt")),
+            args: vec![atom_expr(7), atom_expr(3)],
+        };
+        let f = lower(expr).unwrap();
+        let result = rune_interp::eval(&Noun::Atom(0), &f).unwrap();
+        assert_eq!(result, Noun::Atom(0)); // 0 = true
     }
 }
