@@ -222,17 +222,37 @@ These must be resolved before the relevant milestone:
 
 ## current state
 
-M1 in progress. Completed:
-- workspace scaffold: rune-ast, rune-lex, rune-parse, rune-lower, rune-interp, rune-subject, rune-mold, rune CLI
-- Nox patterns 0–5, 6–9, 10 implemented and tested in rune-interp (7 tests passing)
-- subject model and axis constants defined
-- base molds (@ud, @da, #, @neuron)
-- classic register parser: atoms, let, fn, if, loop, calls, cybermark addresses
-- lowering: Atom, Sym, Cell, Let, If, Eq, Inc, Eval, Compose, Hint, Trap, Gate, Call, Address
+M1 complete. M2–M6 substantially implemented, M8 partially done. M7 skipped (not needed).
 
-Remaining in M1:
-- Nox patterns 11 (scry with runtime hook) — currently returns error
-- parser: multi-param gates, struct/enum bodies, operator expressions (+, *, ==)
-- lowering: Door (multi-arm core), Rebind (=. slot mutation), Match (switch)
-- REPL loop for `rune eval`
-- integration tests: double, fibonacci, factorial end-to-end
+### completed
+
+**M1** — all Nox patterns (0–17) covered; `rune eval '42'` and `rune run file.rune` work.
+- workspace: rune-ast, rune-lex, rune-parse, rune-lower, rune-interp, rune-subject, rune-mold, rune CLI
+- Nox patterns 0–17 in rune-interp (44 unit tests)
+- classic register parser: atoms, let, fn, if, loop, match, impl/door, rebind/continue, cybermark addresses, `< > <= >= == != + - * /`
+- lowering: all Expr variants including Trap/Loop (dynamic $ axis), Rebind (depth-d subject rebuild), Door/Arm, Match, Gate (call-site inlining for closures)
+- integration tests: double(5)=10, fibonacci(10)=55, factorial(5)=120, closures
+
+**M2** (partial) — subject model axis constants defined; hemera hash is a stub (wrapping hash of bytes)
+
+**M3** (partial) — base molds @ud, @da, #, @neuron; strata molds @nebu, @kuro, @jali, @trop, @genies; mold_and()
+
+**M4** — pure register crate (rune-parse-pure) exists; 25 digraphs mapped to Expr variants
+
+**M5** (partial) — hint passthrough (opcode 16 body evaluates correctly); host stub (identity); scry stub (returns 0)
+
+**M6** (partial) — rune-compile TierRouter: hot-path counter, background compile stub, artifact cache
+
+**M8** (partial) — ResultCache in TierRouter: (formula_hash, subject_hash) memoization for pure formulas after hot_threshold
+
+### pending
+
+- M2: hemera hash integration (`~/cyber/hemera/rs` → real hash for opcode 15 and string_to_atom)
+- M2: scry (opcode 17) — look up path in subject's ~world slot (axis 255) instead of returning 0
+- M3: `rune check` command — static mold pass
+- M4: `rune fmt --to=rune` — pure register pretty-printer
+- M5: hint parking (HintHandle + event loop) — currently hint just evaluates body synchronously
+- M5: host WASM bridge (wasmi) — currently identity stub
+- M6: trident TIR emission for pure functions
+- M9: zheng proof generation
+- M10: Kelvin freeze audit
