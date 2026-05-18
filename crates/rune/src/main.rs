@@ -32,12 +32,62 @@ fn cmd_eval(args: &[String]) {
     run_source(expr);
 }
 
-fn cmd_fmt(_args: &[String]) {
-    eprintln!("fmt: not yet implemented (M4)");
+fn cmd_fmt(args: &[String]) {
+    let (path, to_rune) = if args.first().map(String::as_str) == Some("--to=rune") {
+        (args.get(1), true)
+    } else {
+        (args.first(), false)
+    };
+
+    let path = path.unwrap_or_else(|| {
+        eprintln!("usage: rune fmt [--to=rust|--to=rune] <file>");
+        std::process::exit(1);
+    });
+
+    if to_rune {
+        println!("(pure register fmt coming in M4)");
+        return;
+    }
+
+    let src = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(1);
+    });
+
+    let ast = match rune_parse::parse(&src) {
+        Ok(a)  => a,
+        Err(e) => { eprintln!("parse error: {}", e.message); std::process::exit(1); }
+    };
+
+    println!("{}", rune_parse::format_expr(&ast));
 }
 
-fn cmd_check(_args: &[String]) {
-    eprintln!("check: not yet implemented (M3)");
+fn cmd_check(args: &[String]) {
+    let path = args.first().unwrap_or_else(|| {
+        eprintln!("usage: rune check <file>");
+        std::process::exit(1);
+    });
+
+    let src = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(1);
+    });
+
+    let ast = match rune_parse::parse(&src) {
+        Ok(a)  => a,
+        Err(e) => { eprintln!("parse error: {}", e.message); std::process::exit(1); }
+    };
+
+    let errors = rune_mold::MoldChecker::check(&ast);
+
+    if errors.is_empty() {
+        println!("ok");
+    } else {
+        for e in &errors {
+            eprintln!("{}", e.message);
+        }
+        std::process::exit(1);
+    }
 }
 
 fn run_source(src: &str) {

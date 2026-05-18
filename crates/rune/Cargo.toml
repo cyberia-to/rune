@@ -14,4 +14,5 @@ rune-parse   = { workspace = true }
 rune-lower   = { workspace = true }
 rune-interp  = { workspace = true }
 rune-subject = { workspace = true }
+rune-mold    = { workspace = true }
 rune-compile = { workspace = true }
