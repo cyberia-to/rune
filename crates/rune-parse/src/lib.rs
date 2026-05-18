@@ -483,28 +483,52 @@ pub fn format_expr(expr: &rune_ast::Expr) -> String {
         Expr::Atom(n) => n.to_string(),
         Expr::Sym(s) => s.clone(),
         Expr::Cell(h, t) => format!("[{}, {}]", format_expr(h), format_expr(t)),
-        Expr::Let { name, value, body, .. } =>
-            format!("let {} = {};\n{}", name, format_expr(value), format_expr(body)),
+        Expr::Let { name, value, body, mold } => {
+            let annotation = mold.as_ref().map(|m| format!(": {}", format_expr(m))).unwrap_or_default();
+            format!("let {}{} = {};\n{}", name, annotation, format_expr(value), format_expr(body))
+        }
         Expr::If { cond, yes, no } =>
-            format!("if {} {{ {} }} else {{ {} }}", format_expr(cond), format_expr(yes), format_expr(no)),
-        Expr::Gate { sample, body } =>
-            format!("fn({}) {{ {} }}", format_expr(sample), format_expr(body)),
-        Expr::Call { gate, args } =>
-            format!("{}({})", format_expr(gate), args.iter().map(format_expr).collect::<Vec<_>>().join(", ")),
+            format!("if {} {{\n    {}\n}} else {{\n    {}\n}}", format_expr(cond), format_expr(yes), format_expr(no)),
+        Expr::Gate { sample, body } => {
+            let params = match sample.as_ref() {
+                Expr::Sym(s) if s.starts_with("param:") => s["param:".len()..].replace(';', ", "),
+                Expr::Atom(0) => String::new(),
+                _ => format_expr(sample),
+            };
+            format!("fn({}) {{ {} }}", params, format_expr(body))
+        }
+        Expr::Call { gate, args } => {
+            // Emit infix form for built-in operators
+            if let Expr::Sym(name) = gate.as_ref() {
+                let (a, b) = match args.as_slice() {
+                    [a, b] => (Some(a), Some(b)),
+                    _ => (None, None),
+                };
+                match name.as_str() {
+                    "add" if a.is_some() => return format!("{} + {}", format_expr(a.unwrap()), format_expr(b.unwrap())),
+                    "sub" if a.is_some() => return format!("{} - {}", format_expr(a.unwrap()), format_expr(b.unwrap())),
+                    "mul" if a.is_some() => return format!("{} * {}", format_expr(a.unwrap()), format_expr(b.unwrap())),
+                    "lt"  if a.is_some() => return format!("{} < {}", format_expr(a.unwrap()), format_expr(b.unwrap())),
+                    "gt"  if a.is_some() => return format!("{} > {}", format_expr(a.unwrap()), format_expr(b.unwrap())),
+                    _ => {}
+                }
+            }
+            format!("{}({})", format_expr(gate), args.iter().map(format_expr).collect::<Vec<_>>().join(", "))
+        }
         Expr::Eq(a, b) => format!("{} == {}", format_expr(a), format_expr(b)),
         Expr::Inc(x) => format!("{} + 1", format_expr(x)),
-        Expr::Trap(body) => format!("loop {{ {} }}", format_expr(body)),
+        Expr::Trap(body) => format!("loop {{\n    {}\n}}", format_expr(body)),
         Expr::Address(a) => format!("{a:?}"),
         Expr::Match { subject, arms } => {
             let arms_str: Vec<String> = arms.iter()
-                .map(|(p, b)| format!("{} => {}", format_expr(p), format_expr(b)))
+                .map(|(p, b)| format!("    {} => {}", format_expr(p), format_expr(b)))
                 .collect();
-            format!("match {} {{ {} }}", format_expr(subject), arms_str.join(", "))
+            format!("match {} {{\n{}\n}}", format_expr(subject), arms_str.join(",\n"))
         }
-        Expr::Loop => "$".to_string(),
+        Expr::Loop => "continue".to_string(),
         Expr::Door(arms) => {
             let arms_str: Vec<String> = arms.iter().map(format_expr).collect();
-            format!("impl {{ {} }}", arms_str.join(" "))
+            format!("impl {{\n    {}\n}}", arms_str.join("\n    "))
         }
         Expr::Arm { name, body } => {
             format!("fn {}() {{ {} }}", name, format_expr(body))
