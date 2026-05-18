@@ -15,7 +15,7 @@ cybermark  →  rune inline  →  rune  →  trident  →  Rs
 ```
 
 Sibling repos (all at `~/cyber/`):
-- `nox/rs`     — Nox VM (16-pattern tree-reduction); added as dep in M6
+- `nox/rs`     — Nox VM (18-pattern tree-reduction: 16 compute + call + look); added as dep in M6
 - `trident`    — compile path substrate; added as dep in M6
 - `strata`     — algebra molds (@nebu, @kuro…); added in M3
 - `hemera/rs`  — hash primitive; added in M2

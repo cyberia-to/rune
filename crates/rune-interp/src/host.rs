@@ -26,7 +26,7 @@ pub fn gpu(_shader_hash: u64, data: &Noun) -> Result<Noun, HostError> {
     Ok(data.clone())
 }
 
-/// ONNX inference stub.
+/// glia inference stub.
 pub fn infer(_model_hash: u64, input: &Noun) -> Result<Noun, HostError> {
     Ok(input.clone())
 }

@@ -121,7 +121,7 @@ Work packages:
 - `rune-interp`: implement host bridge
   - `wasmi` crate for WASM modules
   - `host::wasm(module_particle, fn_name, args)` → Noun
-  - host::gpu and host::infer stubs (return Noun::Atom(0) until wGPU/ONNX land)
+  - host::gpu and host::infer stubs (return Noun::Atom(0) until wGPU/glia land)
 - `rune-lower`: lower `Expr::Hint` and `Expr::Host` to Nox patterns 10 and runtime hooks
 - `rune-lower`: lower `Expr::Eval` to Nox pattern 2 (already handled in lowering)
 - tests: graph reactor loop with mock event source terminates after N events

@@ -32,7 +32,7 @@ the model is correct. the surface taxes adoption. take the model, keep the origi
 |---------|--------------|
 | Rust-shape syntax option | minutes to onboard anyone with ALGOL or Rust background |
 | `hint` for async | explicit yield/resume tied to [[cybergraph]] events |
-| `host()` for FFI | clear boundary to WASM, wGPU, ONNX |
+| `host()` for FFI | clear boundary to WASM, wGPU, [[glia]] |
 | `eval()` ergonomic form | syntax sugar over `.*` for everyday code |
 | instant start | tree construction stands in for compilation — no build phase |
 | three jet categories | pure (proven), host (practical), hint (async) |
@@ -252,7 +252,7 @@ the runtime parks the trap. when [[radio]] delivers a matching event or the [[cy
 
 ### host — the only genuine trust boundary
 
-a host call runs native code outside [[Nox]] — WASM module, wGPU shader, ONNX inference. the call returns a noun. the proof system records "host result was N" as a witness; the surrounding pure computation is provable conditional on that witness. the host computation itself carries no [[Nox]] trace.
+a host call runs native code outside [[Nox]] — WASM module, wGPU shader, [[glia]] inference. the call returns a noun. the proof system records "host result was N" as a witness; the surrounding pure computation is provable conditional on that witness. the host computation itself carries no [[Nox]] trace.
 
 ```
 =/  features  ~host:%infer.model.input
@@ -441,7 +441,7 @@ tree-walking interpreter    compile pipeline
      ▼
 Nox runtime
 + Rs jets (compiled hot paths)
-+ host bridge (WASM, wGPU, ONNX)
++ host bridge (WASM, wGPU, [[glia]])
 + cybergraph cache (compiled artifacts as particles)
 ```
 
@@ -464,7 +464,7 @@ same [[Nox]] noun, lowered further to [[trident]]'s TIR. same TIR passes (DCE, i
 
 three new TIR opcodes for rune's dynamism:
 - `hint` — yields execution, resumes on matching event. opaque to optimizer
-- `host` — escapes to WASM/wGPU/ONNX, returns a noun. typed return shape lets optimizer reason about callers
+- `host` — escapes to WASM/wGPU/[[glia]], returns a noun. typed return shape lets optimizer reason about callers
 - `eval` — runs a dynamically constructed formula. requires runtime interpreter callback from compiled code
 
 compilation result is itself a [[particle]]. indexed in the [[cybergraph]] by source particle. reusable across all [[neurons]] — the planetary compilation cache.
@@ -529,7 +529,7 @@ rune-only extensions — what the trident checker explicitly rejects:
 | form | what it does | why excluded |
 |------|-------------|--------------|
 | `hint expr` | parks execution until external event | proofs become conditional on event log |
-| `host(target, args)` | escapes to WASM/wGPU/ONNX | result is an asserted witness |
+| `host(target, args)` | escapes to WASM/wGPU/[[glia]] | result is an asserted witness |
 | `eval(formula)` | executes a runtime-constructed formula | proof depends on runtime content |
 
 a rune file containing none of the three dynamic forms is [[trident]]-compatible as-is — no translation, same grammar.
@@ -580,7 +580,7 @@ Nox reduction (tree rewriting)
   ├── host jets → practical computing
   │     ├── wasm(module, fn, args)   → wasmi execution
   │     ├── gpu(shader, data)        → wgpu compute dispatch
-  │     └── infer(model, input)      → burn-webnn ONNX
+  │     └── infer(model, input)      → [[glia]] inference
   │
   └── hint → async input from the world
         ├── network event ([[radio]])

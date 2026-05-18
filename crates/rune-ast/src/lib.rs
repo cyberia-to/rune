@@ -59,7 +59,7 @@ pub enum Expr {
     Scry { mold: Box<Expr>, path: Box<Expr> },
     /// Hint: event-reactive yield
     Hint { tag: String, selector: Box<Expr>, body: Box<Expr> },
-    /// Host call: escape to WASM / wGPU / ONNX
+    /// Host call: escape to WASM / wGPU / glia
     Host { target: String, args: Box<Expr> },
     /// Arm definition (within a door/core)
     Arm { name: String, body: Box<Expr> },
