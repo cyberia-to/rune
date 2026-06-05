@@ -56,7 +56,7 @@ one language with one AST, parsed from two syntactic registers. both lower to th
 | register | tag | who writes it |
 |----------|-----|--------------|
 | `rust` | `rust` | every Rust, Go, or TypeScript programmer day one |
-| `rune` | `rune` | systems programmers, [[semcons|semcon]] authors, agent kernels |
+| `rune` | `rune` | systems programmers, [[dialects|dialect]] authors, agent kernels |
 
 `rune fmt --to=rune` converts mechanically. nothing forces movement. both coexist in the codebase forever.
 
@@ -297,7 +297,7 @@ instant start enables:
 - agent kernels reacting to events with low latency
 - `eval()` of dynamically-built formulas
 - hot code reload by subject rewrite
-- [[semcons]] evaluated on demand
+- [[dialects]] evaluated on demand
 - the [[cyb/robot]] starting up and being responsive immediately
 
 instant start is non-negotiable. every architectural decision is checked against one question: does this preserve the ability to run the program the moment its source becomes available, with no phase between?
@@ -408,7 +408,7 @@ $
 | REPL, scripts, ad-hoc | run once, dies fast | interpret directly |
 | event handlers, UI | run often per session, short bursts | interpret + jet substitution on hot ops |
 | agent kernels ([[cyb/robot]]) | run for years | interpret first, compile in background, swap when ready |
-| [[semcons]] (consensus-critical) | called by every [[neuron]], deterministic + fast | compile AOT through [[trident]], deploy as proven .nox |
+| [[dialects]] (consensus-critical) | called by every [[neuron]], deterministic + fast | compile AOT through [[trident]], deploy as proven .nox |
 | inner-loop primitives | hot, narrow, performance-critical | written in [[Rs]], AOT-compiled, called as jets |
 
 the source language is the same in all five rows. choice is per-particle, opportunistic, and reversible.
@@ -498,7 +498,7 @@ proof generation is lazy. compiled pure regions produce [[zheng]] proofs only wh
 | provability | mandatory — every program produces a [[zheng]] proof | tiered — pure: unconditional; reactive: conditional on event log; host: conditional on host results | reference + jet equivalence verified at compile time |
 | evaluation | AOT compiled to optimized .nox | interpret first, compile in background | AOT compiled to native, deployed as jet |
 | launch latency | slow (compile + prove) | instant (parse + lower + walk) | n/a — runs as called |
-| audience | protocol authors, semcon writers | agent developers, scripters | runtime engineers |
+| audience | protocol authors, dialect writers | agent developers, scripters | runtime engineers |
 
 rune grammar = [[trident]] grammar + three dynamic forms (hint, host, eval). [[trident]] is self-contained; rune depends on [[trident]]'s grammar spec, not its toolchain.
 
@@ -645,6 +645,6 @@ not a merger — a superset relationship. [[trident]] is the substrate grammar. 
 | [[hoon]] | the inspiration for the subject model and pure register |
 | [[zheng]] | the prover — every pure Nox trace becomes a proof |
 | [[cyb/robot]] | the canonical consumer — kernel functions in rune |
-| [[semcons]] | first-class rune constructs |
+| [[dialects]] | first-class rune constructs |
 | [[bbg]] | event log storage substrate |
 | [[radio]] | source of async hints from the network |
