@@ -1,0 +1,17 @@
+# ---
+# tags: rune, prysm, bridge
+# crystal-type: source
+# crystal-domain: comp
+# ---
+[package]
+name = "rune-prysm"
+version = "0.1.0"
+edition = "2021"
+description = "rune ↔ prysm bridge — decode rune result nouns into tape chunks"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rune-ast = { workspace = true }
+tape     = { path = "../../../tape/impl/rust" }

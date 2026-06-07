@@ -10,6 +10,7 @@ members = [
     "crates/rune-parse",
     "crates/rune-parse-pure",
     "crates/rune-lower",
+    "crates/rune-prysm",
     "crates/rune-interp",
     "crates/rune-subject",
     "crates/rune-mold",
@@ -24,6 +25,7 @@ rune-lex        = { path = "crates/rune-lex" }
 rune-parse      = { path = "crates/rune-parse" }
 rune-parse-pure = { path = "crates/rune-parse-pure" }
 rune-lower      = { path = "crates/rune-lower" }
+rune-prysm      = { path = "crates/rune-prysm" }
 rune-interp     = { path = "crates/rune-interp" }
 rune-subject    = { path = "crates/rune-subject" }
 rune-mold       = { path = "crates/rune-mold" }

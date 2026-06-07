@@ -24,7 +24,7 @@
 /// Subject slot axes (right-nested cons list):
 ///   ~self  = 2   ~now   = 6    ~here  = 14   ~caps  = 30
 ///   ~code  = 62  ~libs  = 126  ~mem   = 254  ~world = 255
-use rune_ast::{Address, Expr, Noun};
+use rune_ast::{Address, Expr, Noun, tag};
 use cyber_hemera as hemera;
 
 #[derive(Debug)]
@@ -165,6 +165,9 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         // Atom literal → [1 n]  (quote)
         // ------------------------------------------------------------------
         Expr::Atom(n) => Ok(quote(n)),
+
+        // Text → quote of a `tape` noun (null-terminated byte list).
+        Expr::Text(s) => Ok(Noun::cell(Noun::Atom(1), tape_noun(&s))),
 
         // ------------------------------------------------------------------
         // Symbol → slot lookup
@@ -412,6 +415,14 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
                         let bf = lower_in(it.next().unwrap(), env)?;
                         return Ok(Noun::cell(Noun::Atom(10), Noun::cell(bf, af)));
                     }
+                    // prysm element constructors — lower to chunk-noun `[tag …]`.
+                    // Each evaluates to a value the prysm bridge decodes to a Chunk.
+                    "text"   => return prysm_unary(tag::TEXT,  &args, env),
+                    "anno"   => return prysm_unary(tag::ANNO,  &args, env),
+                    "error"  => return prysm_unary(tag::ERROR, &args, env),
+                    "log"    => return prysm_unary(tag::LOG,   &args, env),
+                    "button" => return prysm_button(&args, env),
+                    "col"    => return prysm_col(&args, env),
                     _ => {}
                 }
 
@@ -746,6 +757,51 @@ fn rebind_subj_formula(depth: usize, value_f: Noun) -> Result<Noun, LowerError> 
 
 fn lower_err(msg: impl Into<String>) -> LowerError {
     LowerError { message: msg.into() }
+}
+
+// ---------------------------------------------------------------------------
+// prysm element lowering — `text("hi")`, `error("boom")`, `button(..)`,
+// `col(..)` lower to chunk-noun formulas `[3 [1 tag] payload-f]`, which
+// evaluate to `[tag <payload-value>]`. `rune-prysm::noun_to_chunks` decodes.
+// ---------------------------------------------------------------------------
+
+/// `[1 <tape>]`-ready tape noun: a null-terminated cons list of byte atoms.
+/// "" → `0`; "hi" → `[104 [105 0]]`.
+fn tape_noun(s: &str) -> Noun {
+    let mut n = Noun::Atom(0);
+    for &b in s.as_bytes().iter().rev() {
+        n = Noun::cell(Noun::Atom(b as u64), n);
+    }
+    n
+}
+
+/// A one-payload prysm element: `[3 [1 tag] payload-f]` → `[tag <payload>]`.
+fn prysm_unary(t: u64, args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
+    if args.len() != 1 {
+        return Err(lower_err(format!("prysm tag {t} requires 1 argument, got {}", args.len())));
+    }
+    let body = lower_in(args[0].clone(), env)?;
+    Ok(op3(quote(t), body))
+}
+
+/// `button(label, target)` → `[BUTTON [label target]]`.
+fn prysm_button(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
+    if args.len() != 2 {
+        return Err(lower_err(format!("button requires 2 arguments, got {}", args.len())));
+    }
+    let label  = lower_in(args[0].clone(), env)?;
+    let target = lower_in(args[1].clone(), env)?;
+    Ok(op3(quote(tag::BUTTON), op3(label, target)))
+}
+
+/// `col(e1, .., en)` → `[LIST e1 [e2 [.. 0]]]` — a null-terminated element list.
+fn prysm_col(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
+    let mut list_f = quote(0); // null terminator value
+    for a in args.iter().rev() {
+        let ef = lower_in(a.clone(), env)?;
+        list_f = op3(ef, list_f);
+    }
+    Ok(op3(quote(tag::LIST), list_f))
 }
 
 // ---------------------------------------------------------------------------

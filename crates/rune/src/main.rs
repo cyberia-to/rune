@@ -13,8 +13,9 @@ fn main() {
     let rest = if args.len() > 2 { &args[2..] } else { &[] };
 
     match cmd {
-        Some("run")   => cmd_run(rest),
-        Some("eval")  => cmd_eval(rest),
+        Some("run")    => cmd_run(rest),
+        Some("eval")   => cmd_eval(rest),
+        Some("render") => cmd_render(rest),
         Some("fmt")   => cmd_fmt(rest),
         Some("check") => cmd_check(rest),
         Some("help") | None => print_help(),
@@ -135,6 +136,42 @@ fn run_source(src: &str) {
     }
 }
 
+/// `rune render <expr>` — evaluate a prysm program and show the tape chunks it
+/// emits. This is the rune↔prysm seam: the same chunks feed prysm's `dispatch`
+/// (wgpu cells / ansi / html). Demo surface for the binding.
+fn cmd_render(args: &[String]) {
+    let expr = args.first().unwrap_or_else(|| {
+        eprintln!("usage: rune render <expr>   e.g. 'col(text(\"hi\"), error(\"boom\"))'");
+        std::process::exit(1);
+    });
+    let ast = match rune_parse::parse(expr) {
+        Ok(a)  => a,
+        Err(e) => { eprintln!("parse error: {}", e.message); std::process::exit(1); }
+    };
+    let formula = match rune_lower::lower(ast) {
+        Ok(n)  => n,
+        Err(e) => { eprintln!("lower error: {}", e.message); std::process::exit(1); }
+    };
+    let subject = rune_subject::Subject::minimal().to_noun();
+    let result = match rune_interp::eval(&subject, &formula) {
+        Ok(n)  => n,
+        Err(e) => { eprintln!("eval error: {}", e.message); std::process::exit(1); }
+    };
+    let chunks = rune_prysm::noun_to_chunks(&result);
+    if chunks.is_empty() {
+        eprintln!("no prysm chunks (result noun: {})", display_noun(&result));
+        return;
+    }
+    for c in &chunks {
+        println!(
+            "({} {}) {}",
+            c.sigil as char,
+            c.render as char,
+            String::from_utf8_lossy(&c.payload),
+        );
+    }
+}
+
 /// Read one line from stdin and parse it as a noun literal.
 /// Empty line or EOF → Atom(0).
 fn read_event_noun() -> rune_ast::Noun {
@@ -230,6 +267,7 @@ fn print_help() {
     println!("commands:");
     println!("  run <file>    interpret a rune program (hints yield; send noun per line)");
     println!("  eval <expr>   evaluate a single expression");
+    println!("  render <expr> evaluate a prysm program → show tape chunks");
     println!("  fmt <file>    format (--to=rust | --to=rune)  [M4]");
     println!("  check <file>  type-check without running       [M3]");
 }

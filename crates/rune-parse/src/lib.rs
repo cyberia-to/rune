@@ -3,7 +3,6 @@
 /// Pure register parser (`rune` sigil syntax) lands in M4.
 use rune_ast::{Address, Expr};
 use rune_lex::{Lexer, Span, Spanned, Token};
-use cyber_hemera as hemera;
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -396,11 +395,7 @@ impl Parser {
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         match self.peek().clone() {
             Token::Int(n)      => { self.advance(); Ok(Expr::Atom(n)) }
-            Token::Str(s)      => {
-                self.advance();
-                let atom = string_to_atom(&s);
-                Ok(Expr::Atom(atom))
-            }
+            Token::Str(s)      => { self.advance(); Ok(Expr::Text(s)) }
             Token::Ident(name) => {
                 self.advance();
                 match name.as_str() {
@@ -507,17 +502,12 @@ pub fn parse(src: &str) -> Result<Expr, ParseError> {
     Parser::new(tokens).parse_program()
 }
 
-/// Name→atom encoding via Poseidon2 (hemera), matching rune-lower.
-fn string_to_atom(s: &str) -> u64 {
-    let digest = hemera::hash(s.as_bytes());
-    u64::from_le_bytes(digest.as_bytes()[..8].try_into().unwrap())
-}
-
 /// Pretty-print an Expr back to classic (rust-style) register syntax.
 pub fn format_expr(expr: &rune_ast::Expr) -> String {
     use rune_ast::Expr;
     match expr {
         Expr::Atom(n) => n.to_string(),
+        Expr::Text(s) => format!("{s:?}"),
         Expr::Sym(s) => s.clone(),
         Expr::Cell(h, t) => format!("[{}, {}]", format_expr(h), format_expr(t)),
         Expr::Let { name, value, body, mold } => {
@@ -633,7 +623,7 @@ mod tests {
     #[test]
     fn parse_string_literal() {
         let e = parse("\"hello\"").unwrap();
-        assert!(matches!(e, Expr::Atom(_)));
+        assert!(matches!(e, Expr::Text(s) if s == "hello"));
     }
 
     #[test]

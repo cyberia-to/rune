@@ -13,12 +13,36 @@ impl Noun {
     }
 }
 
+/// Chunk-noun ABI — the wire between rune result nouns and prysm/tape chunks.
+///
+/// A prysm element is a noun `[tag payload]` where `tag` is one of these small
+/// atoms. `rune-lower` emits these from `text(..)`/`button(..)`/`col(..)` builtins;
+/// `rune-prysm::noun_to_chunks` decodes them into `tape::Chunk`s, which prysm's
+/// `dispatch` renders. This is the only contract between the two; rune never
+/// touches Bevy.
+pub mod tag {
+    /// `[0 e1 [e2 ... 0]]` — a column/list of elements (null-terminated).
+    pub const LIST:   u64 = 0;
+    /// `[1 <tape>]` — body text → `(#, t)` HAX/TEXT
+    pub const TEXT:   u64 = 1;
+    /// `[2 <tape>]` — annotation → `(~, t)` SIG/TEXT
+    pub const ANNO:   u64 = 2;
+    /// `[3 <tape>]` — error → `(!, e)` ZAP/ERROR
+    pub const ERROR:  u64 = 3;
+    /// `[4 <tape>]` — log line → `(., l)` DOT/LOG
+    pub const LOG:    u64 = 4;
+    /// `[5 [<label-tape> <target-tape>]]` — action → `(!, c)` ZAP/COMPONENT
+    pub const BUTTON: u64 = 5;
+}
+
 /// High-level expression AST — shared between classic and pure registers.
 /// Both registers parse to this; lowering produces a Noun.
 #[derive(Debug, Clone)]
 pub enum Expr {
     /// Unsigned integer literal
     Atom(u64),
+    /// UTF-8 text literal — lowers to a `tape` noun (null-terminated byte list)
+    Text(String),
     /// Name reference — resolved against the subject
     Sym(String),
     /// Ordered pair
