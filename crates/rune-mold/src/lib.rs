@@ -267,6 +267,7 @@ impl MoldChecker {
                 // If the let has a mold annotation, record the binding
                 if let Some(mold_expr) = mold {
                     let mold_name = self.mold_name(mold_expr);
+                    self.check_literal_mold(value, &mold_name);
                     self.bindings.push((name.clone(), mold_name));
                 }
                 self.check_expr(body);
@@ -325,8 +326,32 @@ impl MoldChecker {
                 self.check_expr(body);
             }
             // Leaves — nothing to check
-            Expr::Atom(_) | Expr::Sym(_) | Expr::Address(_) | Expr::Loop => {}
+            Expr::Atom(_) | Expr::Text(_) | Expr::Sym(_) | Expr::Address(_) | Expr::Loop => {}
             // Remaining variants — recurse if possible, skip otherwise
+            _ => {}
+        }
+    }
+
+    /// Catch obvious literal/mold mismatches at a typed binding site
+    /// (`let x: @mold = <literal>`).
+    fn check_literal_mold(&mut self, value: &Expr, mold_name: &str) {
+        let text_molds = ["@t", "t", "@tas", "tas", "@p", "p"];
+        let is_text_mold = text_molds.contains(&mold_name);
+        match value {
+            // A text literal must bind to a text mold, never a numeric/atom one.
+            Expr::Text(_) if !is_text_mold => {
+                self.errors.push(MoldError {
+                    message: format!(
+                        "mold error: text literal bound to `{mold_name}`, expected a text mold (@t)"
+                    ),
+                });
+            }
+            // A cell can't satisfy @ud (a bare unsigned integer).
+            Expr::Cell(_, _) if mold_name == "@ud" || mold_name == "ud" => {
+                self.errors.push(MoldError {
+                    message: "mold error: cell bound to `@ud`, expected an atom".into(),
+                });
+            }
             _ => {}
         }
     }
@@ -439,6 +464,39 @@ mod tests {
         };
         let errs = MoldChecker::check(&expr);
         assert!(!errs.is_empty());
+    }
+
+    // ── text-literal mold checks ───────────────────────────────────────────────
+
+    fn typed_let(mold: &str, value: Expr) -> Expr {
+        Expr::Let {
+            name: "x".into(),
+            mold: Some(Box::new(Expr::Address(rune_ast::Address::Neuron(mold.into())))),
+            value: Box::new(value),
+            body: Box::new(Expr::Atom(0)),
+        }
+    }
+
+    #[test]
+    fn text_literal_rejects_numeric_mold() {
+        // let x: @ud = "hi"  → error
+        let errs = MoldChecker::check(&typed_let("ud", Expr::Text("hi".into())));
+        assert!(!errs.is_empty(), "text bound to @ud should error");
+    }
+
+    #[test]
+    fn text_literal_accepts_text_mold() {
+        // let x: @t = "hi"  → ok
+        let errs = MoldChecker::check(&typed_let("t", Expr::Text("hi".into())));
+        assert!(errs.is_empty(), "text bound to @t should pass, got {errs:?}");
+    }
+
+    #[test]
+    fn cell_rejects_ud_mold() {
+        // let x: @ud = [1 2]  → error
+        let cell = Expr::Cell(Box::new(Expr::Atom(1)), Box::new(Expr::Atom(2)));
+        let errs = MoldChecker::check(&typed_let("ud", cell));
+        assert!(!errs.is_empty(), "cell bound to @ud should error");
     }
 
     // ── @nebu tests ──────────────────────────────────────────────────────────

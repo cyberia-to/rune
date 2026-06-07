@@ -24,7 +24,7 @@
 /// Subject slot axes (right-nested cons list):
 ///   ~self  = 2   ~now   = 6    ~here  = 14   ~caps  = 30
 ///   ~code  = 62  ~libs  = 126  ~mem   = 254  ~world = 255
-use rune_ast::{Address, Expr, Noun, tag};
+use rune_ast::{Address, Expr, Noun, act, tag};
 use cyber_hemera as hemera;
 
 #[derive(Debug)]
@@ -336,15 +336,9 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         // Host → [16 [host-tag-atom args-f] [1 0]]
         // ------------------------------------------------------------------
         Expr::Host { target: _, args } => {
-            let host_tag = Noun::Atom(string_to_atom("host"));
+            // host act: [16 [act::HOST args-f] [0 2]] — perform, return spliced result
             let args_f = lower_in(*args, env)?;
-            Ok(Noun::cell(
-                Noun::Atom(16),
-                Noun::cell(
-                    Noun::cell(host_tag, args_f),
-                    quote(0),
-                ),
-            ))
+            Ok(act_formula(act::HOST, args_f))
         }
 
         // ------------------------------------------------------------------
@@ -423,6 +417,13 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
                     "log"    => return prysm_unary(tag::LOG,   &args, env),
                     "button" => return prysm_button(&args, env),
                     "col"    => return prysm_col(&args, env),
+                    // act builtins — request a world-touch through the host/ward.
+                    // `emit(x)` → [16 [act args-f] [0 2]] → perform, return result.
+                    "emit"      => return act_unary(act::EMIT,      &args, env),
+                    "query"     => return act_unary(act::QUERY,     &args, env),
+                    "link"      => return act_unary(act::LINK,      &args, env),
+                    "seal"      => return act_unary(act::SEAL,      &args, env),
+                    "subscribe" => return act_unary(act::SUBSCRIBE, &args, env),
                     _ => {}
                 }
 
@@ -792,6 +793,27 @@ fn prysm_button(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
     let label  = lower_in(args[0].clone(), env)?;
     let target = lower_in(args[1].clone(), env)?;
     Ok(op3(quote(tag::BUTTON), op3(label, target)))
+}
+
+/// An act: `[16 [act-tag args-f] [0 2]]` — perform the act, then return its
+/// result (spliced by the interpreter at axis 2 = subject head).
+fn act_formula(act_tag: u64, args_f: Noun) -> Noun {
+    Noun::cell(
+        Noun::Atom(16),
+        Noun::cell(
+            Noun::cell(Noun::Atom(act_tag), args_f),
+            axis(2),
+        ),
+    )
+}
+
+/// A one-argument act builtin: `emit(x)`, `query(x)`, `link(x)`, …
+fn act_unary(act_tag: u64, args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
+    if args.len() != 1 {
+        return Err(lower_err(format!("act {act_tag:#x} requires 1 argument, got {}", args.len())));
+    }
+    let args_f = lower_in(args[0].clone(), env)?;
+    Ok(act_formula(act_tag, args_f))
 }
 
 /// `col(e1, .., en)` → `[LIST e1 [e2 [.. 0]]]` — a null-terminated element list.

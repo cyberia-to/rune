@@ -153,11 +153,17 @@ fn cmd_render(args: &[String]) {
         Err(e) => { eprintln!("lower error: {}", e.message); std::process::exit(1); }
     };
     let subject = rune_subject::Subject::minimal().to_noun();
-    let result = match rune_interp::eval(&subject, &formula) {
+
+    // Host-driven: `emit` acts are collected as they fire; the final result is
+    // decoded too (the `col(text(..))` style). Demonstrates the act path.
+    let mut host = CollectHost { emitted: Vec::new() };
+    let result = match rune_interp::eval_with_host(&subject, &formula, &mut host) {
         Ok(n)  => n,
         Err(e) => { eprintln!("eval error: {}", e.message); std::process::exit(1); }
     };
-    let chunks = rune_prysm::noun_to_chunks(&result);
+    let mut chunks = Vec::new();
+    for n in &host.emitted { chunks.extend(rune_prysm::noun_to_chunks(n)); }
+    chunks.extend(rune_prysm::noun_to_chunks(&result));
     if chunks.is_empty() {
         eprintln!("no prysm chunks (result noun: {})", display_noun(&result));
         return;
@@ -169,6 +175,25 @@ fn cmd_render(args: &[String]) {
             c.render as char,
             String::from_utf8_lossy(&c.payload),
         );
+    }
+}
+
+/// A host that collects `emit` act payloads — the CLI's stand-in for a surface.
+struct CollectHost {
+    emitted: Vec<rune_ast::Noun>,
+}
+
+impl rune_interp::Host for CollectHost {
+    fn perform(
+        &mut self,
+        act: u64,
+        args: &rune_ast::Noun,
+        _caps: &rune_ast::Noun,
+    ) -> Result<rune_ast::Noun, rune_interp::InterpError> {
+        if act == rune_ast::act::EMIT {
+            self.emitted.push(args.clone());
+        }
+        Ok(rune_ast::Noun::Atom(0))
     }
 }
 
@@ -225,7 +250,6 @@ fn display_noun(noun: &rune_ast::Noun) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rune_ast::Noun::{Atom, Cell};
 
     fn a(n: u64) -> rune_ast::Noun { rune_ast::Noun::Atom(n) }
     fn c(h: rune_ast::Noun, t: rune_ast::Noun) -> rune_ast::Noun { rune_ast::Noun::cell(h, t) }

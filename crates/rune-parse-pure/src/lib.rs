@@ -106,7 +106,7 @@ impl Parser {
             Token::LParen  => self.parse_paren_form(),
             Token::LBrack  => self.parse_bracket_cell(),
             Token::Int(n)  => { self.advance(); Ok(Expr::Atom(n)) }
-            Token::Str(s)  => { self.advance(); Ok(Expr::Atom(string_to_atom(&s))) }
+            Token::Str(s)  => { self.advance(); Ok(Expr::Text(s)) }
             Token::Percent => {
                 // %term — term literal
                 self.advance();
@@ -606,6 +606,7 @@ pub fn parse(src: &str) -> Result<Expr, ParseError> {
 pub fn format_expr(expr: &Expr) -> String {
     match expr {
         Expr::Atom(n)  => n.to_string(),
+        Expr::Text(s)  => format!("{s:?}"),
         Expr::Sym(s)   => s.clone(),
         Expr::Cell(h, t) => format!(":-  {}\n{}", format_expr(h), format_expr(t)),
         Expr::Let { name, value, body, .. } =>

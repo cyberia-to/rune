@@ -35,6 +35,32 @@ pub mod tag {
     pub const BUTTON: u64 = 5;
 }
 
+/// Act ABI — the world-touching effects a runtime requests through the ward.
+///
+/// An act is encoded as opcode-16: `[16 [act-tag args-f] cont]`. The interpreter
+/// (`eval_with_host`) reads `~caps` (axis 30), hands `(act, args, caps)` to a
+/// `Host`, splices the result, and continues `cont`. Pure `eval` no-ops acts.
+/// Non-act opcode-16 tags remain hints (event parking). See `cyb/root/ward.md`.
+pub mod act {
+    /// Act tags live in a high reserved window, clear of user hint tags
+    /// (small ints / string-hash tags won't realistically land here).
+    pub const BASE: u64 = 0xAC75_0000_0000_0000;
+    pub const EMIT:      u64 = BASE + 1; // render prysm chunks to a surface
+    pub const QUERY:     u64 = BASE + 2; // read the cybergraph (one-shot)
+    pub const LINK:      u64 = BASE + 3; // write a cyberlink
+    pub const SEAL:      u64 = BASE + 4; // finalize an intent
+    pub const SUBSCRIBE: u64 = BASE + 5; // stream graph events
+    pub const HOST:      u64 = BASE + 6; // invoke another runtime
+
+    /// The subject slot holding the requester's capabilities.
+    pub const CAPS_AXIS: u64 = 30;
+
+    /// True if `tag` names an act (vs an ordinary hint).
+    pub fn is_act(tag: u64) -> bool {
+        tag >= BASE && tag <= BASE + 0xFF
+    }
+}
+
 /// High-level expression AST — shared between classic and pure registers.
 /// Both registers parse to this; lowering produces a Noun.
 #[derive(Debug, Clone)]
