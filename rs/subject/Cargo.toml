@@ -6,7 +6,7 @@ license.workspace = true
 description = "rune subject model — ~self ~now ~here ~caps ~code ~libs ~mem ~world"
 
 [lib]
-path = "src/lib.rs"
+path = "lib.rs"
 
 [dependencies]
 rune-ast = { workspace = true }

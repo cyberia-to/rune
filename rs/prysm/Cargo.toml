@@ -11,7 +11,7 @@ license.workspace = true
 description = "rune ↔ prysm bridge — decode rune result nouns into tape chunks"
 
 [lib]
-path = "src/lib.rs"
+path = "lib.rs"
 
 [dependencies]
 rune-ast = { workspace = true }

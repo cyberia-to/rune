@@ -6,7 +6,7 @@ license.workspace = true
 description = "rune lowering — AST to Nox noun (formula)"
 
 [lib]
-path = "src/lib.rs"
+path = "lib.rs"
 
 [dependencies]
 rune-ast     = { workspace = true }

@@ -6,4 +6,4 @@ license.workspace = true
 description = "rune AST — shared noun form for both syntactic registers"
 
 [lib]
-path = "src/lib.rs"
+path = "lib.rs"

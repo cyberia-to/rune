@@ -6,7 +6,7 @@ license.workspace = true
 description = "rune mold system — types as runtime normalizing functions"
 
 [lib]
-path = "src/lib.rs"
+path = "lib.rs"
 
 [dependencies]
 rune-ast = { workspace = true }

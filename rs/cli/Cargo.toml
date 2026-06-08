@@ -7,7 +7,7 @@ description = "rune CLI — run, eval, fmt, check"
 
 [[bin]]
 name = "rune"
-path = "src/main.rs"
+path = "main.rs"
 
 [dependencies]
 rune-ast        = { workspace = true }

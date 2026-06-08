@@ -6,7 +6,7 @@ license.workspace = true
 description = "rune interpreter — tree-walking Nox evaluator; instant start by construction"
 
 [lib]
-path = "src/lib.rs"
+path = "lib.rs"
 
 [dependencies]
 rune-ast     = { workspace = true }

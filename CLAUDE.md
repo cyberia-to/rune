@@ -51,7 +51,7 @@ and only as a background path — the interpreter path stays the default.
 Use `nu -c '...'` or `nu script.nu` for scripting. Reserve bash for git.
 
 ## Testing
-- Unit tests live in the crate they test (`#[cfg(test)]` in `src/lib.rs`)
+- Unit tests live in the crate they test (`#[cfg(test)]` in `lib.rs`)
 - Integration tests for the CLI go in `rs/cli/tests/`
 - Snapshot tests (insta) for parser and lowering output
 - Every Nox pattern (0–11) must have a unit test in rune-interp

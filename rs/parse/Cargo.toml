@@ -6,7 +6,7 @@ license.workspace = true
 description = "rune parser — classic (rust) register; pure (rune) register lands in M4"
 
 [lib]
-path = "src/lib.rs"
+path = "lib.rs"
 
 [dependencies]
 rune-ast        = { workspace = true }
