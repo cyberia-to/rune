@@ -32,7 +32,10 @@ rune/
 
 ## phases
 
-1. **Restructure** (this commit)
+Phases 1–4 DONE (commits c21c62f, 3274190, 4b9931e, 677d96f). Structure now
+matches inf/hemera. Remaining work is the deferred quality-audit findings below.
+
+1. **Restructure** ✅
    - `git mv crates/rune-X rs/X` (strip prefix), `crates/rune rs/cli`
    - move root Cargo.toml → rs/Cargo.toml; members bare; workspace.deps paths
      bare; `cyber-hemera` path `../hemera/rs` → `../../hemera/rs`; add
