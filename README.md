@@ -6,7 +6,7 @@ provable at every tier: pure code unconditionally, event-reactive code relative 
 
 rune is the dynamic evaluation layer above [[trident]]'s 14 deterministic substrate languages. it adds three extensions: `hint` (event stream), `eval` (runtime formulas), `host` (external compute) — each with its own proof contract. `host` is the only genuine trust boundary.
 
-full language specification: [specs/README.md](specs/README.md)
+full language specification: [specs/README.md](specs/README.md) · learn by doing: [docs/](docs/README.md)
 
 ---
 
