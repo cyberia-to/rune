@@ -25,8 +25,10 @@ milestones M1–M10 toward the Kelvin freeze (see `PLAN.md`).
   event, emitting as it runs, threading evolving state (M5).
 - **rune↔prysm bridge** (`rune-prysm`) — decodes a chunk-noun into `tape::Chunk`s,
   the exact wire format prysm renders. `rune eval` shows emitted/returned chunks.
-- **CLI** (`rune`) — `run` (event loop), `eval` (host-aware one-shot), `fmt`,
-  `check`; 10 end-to-end tests pin the command contract.
+- **CLI** (`rune`) — a **REPL** (no-arg) with persistent `let` bindings, ANSI
+  chunk rendering, a colored banner, and `:help`/`:env`/`:reset`/`:quit`
+  meta-commands; plus `run` (event loop), `eval` (host-aware one-shot), `fmt`,
+  `check`, `--version`. End-to-end tests pin the command + REPL contract.
 
 ### Notes
 

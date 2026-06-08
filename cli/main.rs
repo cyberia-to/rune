@@ -1,22 +1,32 @@
 //! rune CLI
 //!
 //! Commands:
+//!   rune                         start the REPL
 //!   rune run <file>              interpret a program (hints yield; send a noun per line)
 //!   rune eval <expr>             evaluate one expression — acts render as prysm chunks
 //!   rune fmt [--to=rust|--to=rune] <file>   format source between registers
 //!   rune check <file>            type-check (mold) without running
 
+mod banner;
+mod render;
+mod repl;
+
+use std::io::IsTerminal;
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let cmd = args.get(1).map(String::as_str);
     let rest = if args.len() > 2 { &args[2..] } else { &[] };
+    let color = std::io::stdout().is_terminal();
 
     match cmd {
+        None | Some("repl") => repl::run(color),
         Some("run")   => cmd_run(rest),
-        Some("eval")  => cmd_eval(rest),
+        Some("eval")  => cmd_eval(rest, color),
         Some("fmt")   => cmd_fmt(rest),
         Some("check") => cmd_check(rest),
-        Some("help") | None => print_help(),
+        Some("help") | Some("-h") | Some("--help") => print!("{}", banner::help(color)),
+        Some("--version") | Some("-V") => println!("rune {}", env!("CARGO_PKG_VERSION")),
         Some(c) => { eprintln!("unknown command: {c}"); std::process::exit(1); }
     }
 }
@@ -35,7 +45,7 @@ fn cmd_run(args: &[String]) {
 /// program whose value is itself a renderable noun — `text("hi")`, `col(...)` —
 /// is decoded the same way. Anything else (arithmetic, plain cells) prints as a
 /// noun.
-fn cmd_eval(args: &[String]) {
+fn cmd_eval(args: &[String], color: bool) {
     let expr = args.first().unwrap_or_else(|| { eprintln!("usage: rune eval <expr>"); std::process::exit(1); });
     let formula = lower_ast(parse_ast(expr));
     let subject = rune_subject::Subject::minimal().to_noun();
@@ -55,14 +65,7 @@ fn cmd_eval(args: &[String]) {
     if chunks.is_empty() {
         println!("{}", display_noun(&result));
     } else {
-        for c in &chunks {
-            println!(
-                "({} {}) {}",
-                c.sigil as char,
-                c.render as char,
-                String::from_utf8_lossy(&c.payload),
-            );
-        }
+        println!("{}", render::ansi_chunks(&chunks, color));
     }
 }
 
@@ -149,8 +152,8 @@ fn run_source_event(src: &str) {
 }
 
 /// A host that collects `emit` act payloads — the CLI's stand-in for a surface.
-struct CollectHost {
-    emitted: Vec<rune_ast::Noun>,
+pub(crate) struct CollectHost {
+    pub(crate) emitted: Vec<rune_ast::Noun>,
 }
 
 impl rune_interp::Host for CollectHost {
@@ -210,26 +213,11 @@ fn split_noun_pair(s: &str) -> Option<(&str, &str)> {
     None
 }
 
-fn display_noun(noun: &rune_ast::Noun) -> String {
+pub(crate) fn display_noun(noun: &rune_ast::Noun) -> String {
     match noun {
         rune_ast::Noun::Atom(n) => n.to_string(),
         rune_ast::Noun::Cell(h, t) => format!("[{} {}]", display_noun(h), display_noun(t)),
     }
-}
-
-fn print_help() {
-    println!("rune — open computation for the cybergraph");
-    println!();
-    println!("commands:");
-    println!("  run <file>    interpret a program (hints yield; send a noun per line)");
-    println!("  eval <expr>   evaluate one expression — acts render as prysm chunks");
-    println!("  fmt <file>    format (--to=rust | --to=rune)");
-    println!("  check <file>  type-check (mold) without running");
-    println!();
-    println!("examples (classic register):");
-    println!("  rune eval '6 * 7'              → 42");
-    println!("  rune eval 'text(\"hi\")'         → (# t) hi");
-    println!("  rune eval 'emit(text(\"hi\"))'   → (# t) hi");
 }
 
 #[cfg(test)]

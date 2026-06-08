@@ -5,7 +5,8 @@
 //! and exit status. This pins the *user-facing contract* of each command —
 //! the unit tests in the library crates cover the internals.
 
-use std::process::{Command, Output};
+use std::io::Write;
+use std::process::{Command, Output, Stdio};
 
 /// Invoke the `rune` binary with `args` and capture its output.
 fn rune(args: &[&str]) -> Output {
@@ -13,6 +14,19 @@ fn rune(args: &[&str]) -> Output {
         .args(args)
         .output()
         .expect("failed to spawn rune binary")
+}
+
+/// Invoke `rune` with `args`, feeding `input` on stdin (for the REPL).
+fn rune_stdin(args: &[&str], input: &str) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rune"))
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn rune binary");
+    child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+    child.wait_with_output().expect("failed to wait on rune")
 }
 
 fn stdout(out: &Output) -> String {
@@ -34,12 +48,21 @@ fn eval_arithmetic_prints_atom() {
 
 #[test]
 fn eval_prysm_value_renders_as_chunk() {
-    // A program whose *value* is a renderable noun decodes to a tape chunk.
+    // A program whose *value* is a renderable noun decodes to a tape chunk and
+    // renders as its text (no sigil noise; colour off because stdout is piped).
     let out = rune(&["eval", r#"text("hi")"#]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(stdout(&out).trim(), "hi");
+}
+
+#[test]
+fn eval_error_decodes_message() {
+    // The error molecule is decoded to its message, not dumped raw.
+    let out = rune(&["eval", r#"error("boom")"#]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
     let s = stdout(&out);
-    assert!(s.contains("(# t)"), "expected text-chunk sigil/render, got: {s}");
-    assert!(s.contains("hi"), "expected payload, got: {s}");
+    assert!(s.contains("boom"), "got: {s}");
+    assert!(!s.contains("level"), "raw molecule leaked: {s}");
 }
 
 #[test]
@@ -117,4 +140,31 @@ fn unknown_command_exits_nonzero() {
     let out = rune(&["frobnicate"]);
     assert!(!out.status.success());
     assert!(stderr(&out).contains("unknown command"), "got: {}", stderr(&out));
+}
+
+#[test]
+fn version_prints_semver() {
+    let out = rune(&["--version"]);
+    assert!(out.status.success());
+    assert!(stdout(&out).starts_with("rune 0."), "got: {}", stdout(&out));
+}
+
+// ── repl ─────────────────────────────────────────────────────────────────────
+
+#[test]
+fn repl_accumulates_bindings_across_lines() {
+    // `let` bindings from earlier lines persist for later expressions.
+    let out = rune_stdin(&["repl"], "let x = 5\nlet y = 7\nx + y\n:q\n");
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(stdout(&out).contains("= 12"), "got: {}", stdout(&out));
+}
+
+#[test]
+fn repl_survives_a_bad_line() {
+    // A parse error on one line must not kill the session.
+    let out = rune_stdin(&["repl"], "6 *\n6 * 7\n:q\n");
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains('✗'), "expected an error marker, got: {s}");
+    assert!(s.contains("= 42"), "expected recovery, got: {s}");
 }

@@ -36,6 +36,7 @@ rune-compile    = { path = "rs/compile" }
 
 # stack deps
 cyber-hemera = { path = "../hemera/rs" }
+tape         = { path = "../tape/impl/rust" }
 
 # stack deps — added when compile path lands (M6)
 # nox   = { path = "../nox/rs" }
