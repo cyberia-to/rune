@@ -57,7 +57,7 @@ pub mod act {
 
     /// True if `tag` names an act (vs an ordinary hint).
     pub fn is_act(tag: u64) -> bool {
-        tag >= BASE && tag <= BASE + 0xFF
+        (BASE..=BASE + 0xFF).contains(&tag)
     }
 }
 

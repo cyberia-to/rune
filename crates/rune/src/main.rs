@@ -1,11 +1,10 @@
-/// rune CLI
-///
-/// Commands:
-///   rune run <file>              parse, lower, and interpret a rune program
-///   rune eval <expr>             evaluate a single expression
-///   rune fmt [--to=rust|--to=rune] <file>   format source
-///   rune check <file>            type-check without running
-use rune_parse_pure;
+//! rune CLI
+//!
+//! Commands:
+//!   rune run <file>              interpret a program (hints yield; send a noun per line)
+//!   rune eval <expr>             evaluate one expression — acts render as prysm chunks
+//!   rune fmt [--to=rust|--to=rune] <file>   format source between registers
+//!   rune check <file>            type-check (mold) without running
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -13,9 +12,8 @@ fn main() {
     let rest = if args.len() > 2 { &args[2..] } else { &[] };
 
     match cmd {
-        Some("run")    => cmd_run(rest),
-        Some("eval")   => cmd_eval(rest),
-        Some("render") => cmd_render(rest),
+        Some("run")   => cmd_run(rest),
+        Some("eval")  => cmd_eval(rest),
         Some("fmt")   => cmd_fmt(rest),
         Some("check") => cmd_check(rest),
         Some("help") | None => print_help(),
@@ -25,35 +23,61 @@ fn main() {
 
 fn cmd_run(args: &[String]) {
     let path = args.first().unwrap_or_else(|| { eprintln!("usage: rune run <file>"); std::process::exit(1); });
-    let src = std::fs::read_to_string(path).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1); });
+    let src = read_file(path);
     run_source_event(&src);
 }
 
+/// `rune eval <expr>` — evaluate a single expression.
+///
+/// Host-aware, so it doubles as the rune↔prysm demo surface. `emit` and the
+/// other acts fire as the program runs and are shown as the tape chunks prysm
+/// would render (the same chunks feed `dispatch` over wgpu/ansi/html). A
+/// program whose value is itself a renderable noun — `text("hi")`, `col(...)` —
+/// is decoded the same way. Anything else (arithmetic, plain cells) prints as a
+/// noun.
 fn cmd_eval(args: &[String]) {
     let expr = args.first().unwrap_or_else(|| { eprintln!("usage: rune eval <expr>"); std::process::exit(1); });
-    run_source(expr);
+    let formula = lower_ast(parse_ast(expr));
+    let subject = rune_subject::Subject::minimal().to_noun();
+
+    // Collect acts as they fire; decode the final value too. This is the act
+    // path end-to-end without the GUI — see `cyb/root/ward.md` for the seam.
+    let mut host = CollectHost { emitted: Vec::new() };
+    let result = match rune_interp::eval_with_host(&subject, &formula, &mut host) {
+        Ok(n)  => n,
+        Err(e) => { eprintln!("eval error: {}", e.message); std::process::exit(1); }
+    };
+
+    let mut chunks = Vec::new();
+    for n in &host.emitted { chunks.extend(rune_prysm::noun_to_chunks(n)); }
+    chunks.extend(rune_prysm::noun_to_chunks(&result));
+
+    if chunks.is_empty() {
+        println!("{}", display_noun(&result));
+    } else {
+        for c in &chunks {
+            println!(
+                "({} {}) {}",
+                c.sigil as char,
+                c.render as char,
+                String::from_utf8_lossy(&c.payload),
+            );
+        }
+    }
 }
 
 fn cmd_fmt(args: &[String]) {
-    let (target, file) = if args.first().map(String::as_str) == Some("--to=rune") {
-        ("rune", args.get(1))
-    } else if args.first().map(String::as_str) == Some("--to=rust") {
-        ("rust", args.get(1))
-    } else {
-        ("rust", args.first())
+    let (target, file) = match args.first().map(String::as_str) {
+        Some("--to=rune") => ("rune", args.get(1)),
+        Some("--to=rust") => ("rust", args.get(1)),
+        _                 => ("rust", args.first()),
     };
     let path = file.unwrap_or_else(|| {
         eprintln!("usage: rune fmt [--to=rust|--to=rune] <file>");
         std::process::exit(1);
     });
-    let src = std::fs::read_to_string(path).unwrap_or_else(|e| {
-        eprintln!("{e}");
-        std::process::exit(1);
-    });
-    let ast = match rune_parse::parse(&src) {
-        Ok(a)  => a,
-        Err(e) => { eprintln!("parse error: {}", e.message); std::process::exit(1); }
-    };
+    let src = read_file(path);
+    let ast = parse_ast(&src);
     if target == "rune" {
         println!("{}", rune_parse_pure::format_expr(&ast));
     } else {
@@ -66,19 +90,9 @@ fn cmd_check(args: &[String]) {
         eprintln!("usage: rune check <file>");
         std::process::exit(1);
     });
-
-    let src = std::fs::read_to_string(path).unwrap_or_else(|e| {
-        eprintln!("{e}");
-        std::process::exit(1);
-    });
-
-    let ast = match rune_parse::parse(&src) {
-        Ok(a)  => a,
-        Err(e) => { eprintln!("parse error: {}", e.message); std::process::exit(1); }
-    };
-
+    let src = read_file(path);
+    let ast = parse_ast(&src);
     let errors = rune_mold::MoldChecker::check(&ast);
-
     if errors.is_empty() {
         println!("ok");
     } else {
@@ -89,19 +103,35 @@ fn cmd_check(args: &[String]) {
     }
 }
 
-/// Event-loop runner for `rune run`.  Drives the hint-parking event loop,
+// ── shared front-end ─────────────────────────────────────────────────────────
+
+/// Read a source file or exit with its IO error.
+fn read_file(path: &str) -> String {
+    std::fs::read_to_string(path).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1); })
+}
+
+/// Parse source to an AST or exit with the parse error.
+fn parse_ast(src: &str) -> rune_ast::Expr {
+    match rune_parse::parse(src) {
+        Ok(a)  => a,
+        Err(e) => { eprintln!("parse error: {}", e.message); std::process::exit(1); }
+    }
+}
+
+/// Lower an AST to a Nox formula or exit with the lower error.
+fn lower_ast(ast: rune_ast::Expr) -> rune_ast::Noun {
+    match rune_lower::lower(ast) {
+        Ok(n)  => n,
+        Err(e) => { eprintln!("lower error: {}", e.message); std::process::exit(1); }
+    }
+}
+
+/// Event-loop runner for `rune run`. Drives the hint-parking event loop,
 /// reading one noun per line from stdin when the program yields.
 fn run_source_event(src: &str) {
     use rune_interp::event::{eval_step, resume, StepResult};
 
-    let ast = match rune_parse::parse(src) {
-        Ok(a)  => a,
-        Err(e) => { eprintln!("parse error: {}", e.message); std::process::exit(1); }
-    };
-    let formula = match rune_lower::lower(ast) {
-        Ok(n)  => n,
-        Err(e) => { eprintln!("lower error: {}", e.message); std::process::exit(1); }
-    };
+    let formula = lower_ast(parse_ast(src));
     let subject = rune_subject::Subject::minimal().to_noun();
 
     let mut step = eval_step(&subject, &formula);
@@ -115,66 +145,6 @@ fn run_source_event(src: &str) {
                 step = resume(continuation, event);
             }
         }
-    }
-}
-
-/// Synchronous runner for `rune eval` (one-shot, no event loop).
-fn run_source(src: &str) {
-    let ast = match rune_parse::parse(src) {
-        Ok(a)  => a,
-        Err(e) => { eprintln!("parse error: {}", e.message); std::process::exit(1); }
-    };
-    let formula = match rune_lower::lower(ast) {
-        Ok(n)  => n,
-        Err(e) => { eprintln!("lower error: {}", e.message); std::process::exit(1); }
-    };
-    let subject = rune_subject::Subject::minimal().to_noun();
-    let mut router = rune_compile::TierRouter::new(10);
-    match router.eval(&subject, &formula) {
-        Ok(result) => println!("{}", display_noun(&result)),
-        Err(e)     => { eprintln!("eval error: {}", e.message); std::process::exit(1); }
-    }
-}
-
-/// `rune render <expr>` — evaluate a prysm program and show the tape chunks it
-/// emits. This is the rune↔prysm seam: the same chunks feed prysm's `dispatch`
-/// (wgpu cells / ansi / html). Demo surface for the binding.
-fn cmd_render(args: &[String]) {
-    let expr = args.first().unwrap_or_else(|| {
-        eprintln!("usage: rune render <expr>   e.g. 'col(text(\"hi\"), error(\"boom\"))'");
-        std::process::exit(1);
-    });
-    let ast = match rune_parse::parse(expr) {
-        Ok(a)  => a,
-        Err(e) => { eprintln!("parse error: {}", e.message); std::process::exit(1); }
-    };
-    let formula = match rune_lower::lower(ast) {
-        Ok(n)  => n,
-        Err(e) => { eprintln!("lower error: {}", e.message); std::process::exit(1); }
-    };
-    let subject = rune_subject::Subject::minimal().to_noun();
-
-    // Host-driven: `emit` acts are collected as they fire; the final result is
-    // decoded too (the `col(text(..))` style). Demonstrates the act path.
-    let mut host = CollectHost { emitted: Vec::new() };
-    let result = match rune_interp::eval_with_host(&subject, &formula, &mut host) {
-        Ok(n)  => n,
-        Err(e) => { eprintln!("eval error: {}", e.message); std::process::exit(1); }
-    };
-    let mut chunks = Vec::new();
-    for n in &host.emitted { chunks.extend(rune_prysm::noun_to_chunks(n)); }
-    chunks.extend(rune_prysm::noun_to_chunks(&result));
-    if chunks.is_empty() {
-        eprintln!("no prysm chunks (result noun: {})", display_noun(&result));
-        return;
-    }
-    for c in &chunks {
-        println!(
-            "({} {}) {}",
-            c.sigil as char,
-            c.render as char,
-            String::from_utf8_lossy(&c.payload),
-        );
     }
 }
 
@@ -247,6 +217,21 @@ fn display_noun(noun: &rune_ast::Noun) -> String {
     }
 }
 
+fn print_help() {
+    println!("rune — open computation for the cybergraph");
+    println!();
+    println!("commands:");
+    println!("  run <file>    interpret a program (hints yield; send a noun per line)");
+    println!("  eval <expr>   evaluate one expression — acts render as prysm chunks");
+    println!("  fmt <file>    format (--to=rust | --to=rune)");
+    println!("  check <file>  type-check (mold) without running");
+    println!();
+    println!("examples (classic register):");
+    println!("  rune eval '6 * 7'              → 42");
+    println!("  rune eval 'text(\"hi\")'         → (# t) hi");
+    println!("  rune eval 'emit(text(\"hi\"))'   → (# t) hi");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,15 +268,4 @@ mod tests {
         let s = display_noun(&noun);
         assert_eq!(parse_noun_literal(&s), Some(noun));
     }
-}
-
-fn print_help() {
-    println!("rune — open computation for the cybergraph");
-    println!();
-    println!("commands:");
-    println!("  run <file>    interpret a rune program (hints yield; send noun per line)");
-    println!("  eval <expr>   evaluate a single expression");
-    println!("  render <expr> evaluate a prysm program → show tape chunks");
-    println!("  fmt <file>    format (--to=rust | --to=rune)  [M4]");
-    println!("  check <file>  type-check without running       [M3]");
 }

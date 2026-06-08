@@ -23,14 +23,17 @@ Sibling repos (all at `~/cyber/`):
 
 ## Crate Map
 ```
-rune-ast      shared AST (Expr) and Noun types
-rune-lex      tokenizer — shared for both registers
-rune-parse    parser — classic (rust) register [pure register: M4]
-rune-lower    Expr → Nox noun
-rune-interp   tree-walking Nox interpreter (instant start)
-rune-subject  subject model (~self ~now ~here ~world …)
-rune-mold     mold system (types as normalizing functions)
-rune          CLI binary (run / eval / fmt / check)
+rune-ast         shared AST (Expr) and Noun types
+rune-lex         tokenizer — shared for both registers
+rune-parse       parser — classic (rust) register
+rune-parse-pure  parser — pure register (all 25 digraphs)
+rune-lower       Expr → Nox noun
+rune-interp      tree-walking Nox interpreter (instant start) + Host/acts
+rune-subject     subject model (~self ~now ~here ~world …)
+rune-mold        mold system (types as normalizing functions)
+rune-prysm       rune↔prysm bridge (chunk-noun → tape::Chunk)
+rune-compile     compile tier — TierRouter, ArtifactCache (M6)
+rune             CLI binary (run / eval / fmt / check)
 ```
 
 ## Invariant: Instant Start

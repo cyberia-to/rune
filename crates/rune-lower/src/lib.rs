@@ -115,7 +115,7 @@ impl Env {
         self.stack
             .iter()
             .position(|n| n == name)
-            .map(|i| stack_axis(i))
+            .map(stack_axis)
     }
 
     /// Find a gate definition by name (last one wins).

@@ -34,7 +34,7 @@ between source and execution, only parsing happens. parse → Nox noun → tree-
 
 ```
 rune run program.rune
-rune eval "(mul 6 7)"
+rune eval '6 * 7'          # classic register → 42
 ```
 
 ---
@@ -67,7 +67,8 @@ cybermark  →  rune inline  →  rune  →  trident  →  Rs
 | `rune-interp` | tree-walking Nox interpreter (instant start) |
 | `rune-subject` | subject model (`~self` `~now` `~here` `~world` …) |
 | `rune-mold` | mold system (types as normalizing functions) |
-| `rune-compile` | compile tier — `TierRouter`, `ArtifactCache` |
+| `rune-prysm` | rune↔prysm bridge — chunk-noun → `tape::Chunk` |
+| `rune-compile` | compile tier — `TierRouter`, `ArtifactCache` (M6) |
 | `rune` | CLI binary (`run` / `eval` / `fmt` / `check`) |
 
 ---
@@ -80,7 +81,7 @@ cybermark  →  rune inline  →  rune  →  trident  →  Rs
 | M2 | subject model (`~self` … `~world`) + cybermark addresses | axis constants done; hemera hash stubbed |
 | M3 | mold system (`@nebu` `@ud` `@p` `@tas` `@t` `@flag`) | basic molds done; `@kuro` `@jali` `@trop` `@genies` `@da` pending |
 | M4 | pure register — all 25 digraphs | done |
-| M5 | dynamic extensions — hint parking, host bridge | stubs; not wired into eval loop |
+| M5 | dynamic extensions — acts, host bridge, hint parking | acts live (`Host` trait, `eval_with_host`); hint parking via `eval_step`/`resume`; deep cell suspend/resume (CPS) pending |
 | M6 | compile tier — `TierRouter`, trident integration stub | router done; trident call stubbed |
 | M7 | planetary cache — compiled artifacts as particles | pending |
 | M8 | profile-guided tiering — background compile, hot-swap | pending |
@@ -95,8 +96,9 @@ items marked "stubbed" compile and run but return `Atom(0)` — the eval path sk
 
 ```sh
 cargo build
-echo "42" | cargo run --bin rune -- eval "42"
-cargo run --bin rune -- eval "(add 6 7)"
+cargo run --bin rune -- eval '6 * 7'              # → 42
+cargo run --bin rune -- eval 'text("hi")'         # → (# t) hi   (a prysm chunk)
+cargo run --bin rune -- eval 'emit(text("hi"))'   # → (# t) hi   (via an act)
 cargo test
 ```
 

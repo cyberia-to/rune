@@ -2,7 +2,7 @@
 name = "rune"
 version = "0.1.0"
 edition = "2021"
-description = "rune CLI — run, eval, fmt"
+description = "rune CLI — run, eval, fmt, check"
 
 [[bin]]
 name = "rune"
@@ -17,4 +17,3 @@ rune-prysm      = { workspace = true }
 rune-interp     = { workspace = true }
 rune-subject    = { workspace = true }
 rune-mold       = { workspace = true }
-rune-compile    = { workspace = true }

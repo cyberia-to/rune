@@ -630,11 +630,11 @@ pub fn format_expr(expr: &Expr) -> String {
                     }
                     "crash" => return "!!".into(),
                     "import-lib" => {
-                        let n = args.first().map(|a| format_expr(a)).unwrap_or_default();
+                        let n = args.first().map(format_expr).unwrap_or_default();
                         return format!("/+  {n}");
                     }
                     "import-types" => {
-                        let n = args.first().map(|a| format_expr(a)).unwrap_or_default();
+                        let n = args.first().map(format_expr).unwrap_or_default();
                         return format!("/-  {n}");
                     }
                     _ => {}

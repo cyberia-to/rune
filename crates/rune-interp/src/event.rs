@@ -92,7 +92,7 @@ pub fn run_cell(
     source: &mut MockEventSource,
 ) -> Result<Noun, InterpError> {
     let mut state = init_state;
-    while let Some(event) = source.next() {
+    for event in source.by_ref() {
         let subject = Noun::cell(event, Noun::cell(state.clone(), base.clone()));
         state = eval_with_host(&subject, gate, host)?;
     }
@@ -108,7 +108,11 @@ impl MockEventSource {
     pub fn new(events: Vec<Noun>) -> Self {
         MockEventSource { events: events.into() }
     }
-    pub fn next(&mut self) -> Option<Noun> {
+}
+
+impl Iterator for MockEventSource {
+    type Item = Noun;
+    fn next(&mut self) -> Option<Noun> {
         self.events.pop_front()
     }
 }

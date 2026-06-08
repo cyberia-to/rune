@@ -1,39 +1,39 @@
-/// Tree-walking Nox interpreter — the instant-start execution path.
-/// Implements all 18 Nox reduction patterns directly over Noun trees.
-/// No external dependencies; no build phase; executes the moment parsing is done.
-///
-/// Nox reduction rules (patterns 0–17):
-///
-/// Structural (5):
-///   [0 n]         axis: n=0 hash-introspect, n=1 identity, n=2 head, n=3 tail,
-///                       n=2k → head(axis(k)), n=2k+1 → tail(axis(k))
-///   [1 v]         quote: return v unchanged
-///   [2 a b]       compose: eval both a,b against subject; reduce(result_a, result_b)
-///   [3 a b]       cons: Noun::cell(eval(a), eval(b))
-///   [4 test y n]  branch: eval test; if result==0 → eval y else → eval n
-///
-/// Field arithmetic over F_p where p = GOLDILOCKS_PRIME (6):
-///   [5 a b]       add: (eval_a + eval_b) % p
-///   [6 a b]       sub: (eval_a - eval_b + p) % p
-///   [7 a b]       mul: (eval_a * eval_b) % p
-///   [8 a]         inv: modular inverse of eval_a under p (0 maps to 0)
-///   [9 a b]       eq:  0 if equal, 1 if not (atoms and cells, structural)
-///   [10 a b]      lt:  0 if eval_a < eval_b, 1 otherwise
-///
-/// Bitwise over u64 (4):
-///   [11 a b]      xor: eval_a XOR eval_b
-///   [12 a b]      and: eval_a AND eval_b
-///   [13 a]        not: bitwise NOT of eval_a
-///   [14 a n]      shl: eval_a << eval_n
-///
-/// Hash + async stubs (3):
-///   [15 a]              hash: stub — return eval_a (real hemera hash in M2)
-///   [16 [tag sel] body] hint/call: evaluate body; tag/selector are reactive metadata (M5)
-///   [17 path]           look: stub for graph scry — return Atom(0) (M2)
-///
-/// Distribution rule: when formula is [f1 f2] where f1 is itself a cell
-/// (not an atom opcode prefix), eval both sides against subject and return
-/// [result_f1, result_f2].  This is the "auto-cons" / distribute pattern.
+//! Tree-walking Nox interpreter — the instant-start execution path.
+//! Implements all 18 Nox reduction patterns directly over Noun trees.
+//! No external dependencies; no build phase; executes the moment parsing is done.
+//!
+//! Nox reduction rules (patterns 0–17):
+//!
+//! Structural (5):
+//!   [0 n]         axis: n=0 hash-introspect, n=1 identity, n=2 head, n=3 tail,
+//!                       n=2k → head(axis(k)), n=2k+1 → tail(axis(k))
+//!   [1 v]         quote: return v unchanged
+//!   [2 a b]       compose: eval both a,b against subject; reduce(result_a, result_b)
+//!   [3 a b]       cons: Noun::cell(eval(a), eval(b))
+//!   [4 test y n]  branch: eval test; if result==0 → eval y else → eval n
+//!
+//! Field arithmetic over F_p where p = GOLDILOCKS_PRIME (6):
+//!   [5 a b]       add: (eval_a + eval_b) % p
+//!   [6 a b]       sub: (eval_a - eval_b + p) % p
+//!   [7 a b]       mul: (eval_a * eval_b) % p
+//!   [8 a]         inv: modular inverse of eval_a under p (0 maps to 0)
+//!   [9 a b]       eq:  0 if equal, 1 if not (atoms and cells, structural)
+//!   [10 a b]      lt:  0 if eval_a < eval_b, 1 otherwise
+//!
+//! Bitwise over u64 (4):
+//!   [11 a b]      xor: eval_a XOR eval_b
+//!   [12 a b]      and: eval_a AND eval_b
+//!   [13 a]        not: bitwise NOT of eval_a
+//!   [14 a n]      shl: eval_a << eval_n
+//!
+//! Hash + async stubs (3):
+//!   [15 a]              hash: stub — return eval_a (real hemera hash in M2)
+//!   [16 [tag sel] body] hint/call: evaluate body; tag/selector are reactive metadata (M5)
+//!   [17 path]           look: stub for graph scry — return Atom(0) (M2)
+//!
+//! Distribution rule: when formula is [f1 f2] where f1 is itself a cell
+//! (not an atom opcode prefix), eval both sides against subject and return
+//! [result_f1, result_f2].  This is the "auto-cons" / distribute pattern.
 
 pub mod event;
 
