@@ -1,7 +1,8 @@
 [package]
-name = "rune"
+name = "rune-cli"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
 description = "rune CLI — run, eval, fmt, check"
 
 [[bin]]

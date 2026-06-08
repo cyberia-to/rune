@@ -1,0 +1,14 @@
+[package]
+name = "rune-parse-pure"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+description = "rune pure register parser — sigil syntax (Hoon-like digraphs)"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rune-ast     = { workspace = true }
+rune-lex     = { workspace = true }
+cyber-hemera = { workspace = true }

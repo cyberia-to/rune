@@ -2,6 +2,7 @@
 name = "rune-compile"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
 description = "rune compile back-end — background compilation and tier management"
 
 [lib]

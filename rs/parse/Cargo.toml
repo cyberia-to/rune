@@ -2,6 +2,7 @@
 name = "rune-parse"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
 description = "rune parser — classic (rust) register; pure (rune) register lands in M4"
 
 [lib]
