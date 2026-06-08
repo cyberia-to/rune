@@ -22,10 +22,11 @@ Sibling repos (all at `~/cyber/`):
 - `zheng`      — prover; added in M9
 
 ## Layout
-The Rust workspace lives at `rs/` — run all `cargo` commands from there.
+The workspace root is the project root (`rune/Cargo.toml`) — run `cargo` from
+there. Library crates live under `rs/`; the CLI is a top-level member at `cli/`
+(hemera-style). No `src/` subdir — `lib.rs`/`main.rs` sit at each crate root.
 Folders are bare; package names keep the `rune-` prefix (folder `rs/ast` →
-package `rune-ast`). Docs live at the project root beside `rs/`:
-`specs/`, `docs/`, `.claude/`.
+package `rune-ast`). Docs live at the project root: `specs/`, `docs/`, `.claude/`.
 
 ```
 rs/ast          rune-ast         shared AST (Expr) and Noun types
@@ -38,7 +39,7 @@ rs/subject      rune-subject     subject model (~self ~now ~here ~world …)
 rs/mold         rune-mold        mold system (types as normalizing functions)
 rs/prysm        rune-prysm       rune↔prysm bridge (chunk-noun → tape::Chunk)
 rs/compile      rune-compile     compile tier — TierRouter, ArtifactCache (M6)
-rs/cli          rune-cli         CLI binary `rune` (run / eval / fmt / check)
+cli             rune-cli         CLI binary `rune` (repl / run / eval / fmt / check)
 ```
 
 ## Invariant: Instant Start

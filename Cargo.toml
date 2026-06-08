@@ -1,0 +1,42 @@
+# ---
+# tags: rune, language, config
+# crystal-type: source
+# crystal-domain: comp
+# ---
+[workspace]
+members = [
+    "rs/ast",
+    "rs/lex",
+    "rs/parse",
+    "rs/parse-pure",
+    "rs/lower",
+    "rs/prysm",
+    "rs/interp",
+    "rs/subject",
+    "rs/mold",
+    "rs/compile",
+    "cli",
+]
+resolver = "3"
+
+[workspace.package]
+license = "Cyber"
+
+[workspace.dependencies]
+rune-ast        = { path = "rs/ast" }
+rune-lex        = { path = "rs/lex" }
+rune-parse      = { path = "rs/parse" }
+rune-parse-pure = { path = "rs/parse-pure" }
+rune-lower      = { path = "rs/lower" }
+rune-prysm      = { path = "rs/prysm" }
+rune-interp     = { path = "rs/interp" }
+rune-subject    = { path = "rs/subject" }
+rune-mold       = { path = "rs/mold" }
+rune-compile    = { path = "rs/compile" }
+
+# stack deps
+cyber-hemera = { path = "../hemera/rs" }
+
+# stack deps — added when compile path lands (M6)
+# nox   = { path = "../nox/rs" }
+# nebu  = { package = "cyb-nebu", path = "../strata/nebu/rs" }
