@@ -766,6 +766,15 @@ mod tests {
         }
     }
 
+    /// The M4 completion signal: the same program in both registers parses to
+    /// the same AST. Compared via Debug since Expr has no PartialEq.
+    #[test]
+    fn double_is_the_same_ast_in_both_registers() {
+        let classic = rune_parse::parse("fn double(x: @ud) { x * 2 }").unwrap();
+        let pure = parse("(|= x=@ud (mul x 2))").unwrap();
+        assert_eq!(format!("{classic:?}"), format!("{pure:?}"));
+    }
+
     #[test]
     fn format_gate_roundtrip() {
         let e = Expr::Gate {

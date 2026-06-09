@@ -47,8 +47,15 @@ fn cmd_run(args: &[String]) {
 /// is decoded the same way. Anything else (arithmetic, plain cells) prints as a
 /// noun.
 fn cmd_eval(args: &[String], color: bool) {
-    let expr = args.first().unwrap_or_else(|| { eprintln!("usage: rune eval <expr>"); std::process::exit(1); });
-    let formula = lower_ast(parse_ast(expr));
+    // optional leading register flag: --pure | --classic
+    let (reg, rest) = match args.first().map(String::as_str) {
+        Some("--pure")    => (Some(rune_parse::Register::Pure), &args[1..]),
+        Some("--classic") => (Some(rune_parse::Register::Classic), &args[1..]),
+        _                 => (None, args),
+    };
+    let expr = rest.first().unwrap_or_else(|| { eprintln!("usage: rune eval [--pure|--classic] <expr>"); std::process::exit(1); });
+    let register = reg.unwrap_or_else(|| rune_parse::detect_register(expr));
+    let formula = lower_ast(parse_in(expr, register));
     let subject = subject();
 
     // Collect acts as they fire; decode the final value too. This is the act
@@ -125,11 +132,36 @@ fn read_file(path: &str) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1); })
 }
 
-/// Parse source to an AST or exit with the parse error.
+/// Parse source to an AST, choosing the register from a `:: register:` pragma
+/// (default classic). Exits on parse error.
 fn parse_ast(src: &str) -> rune_ast::Expr {
-    match rune_parse::parse(src) {
-        Ok(a)  => a,
-        Err(e) => { eprintln!("parse error: {}", e.message); std::process::exit(1); }
+    parse_in(src, rune_parse::detect_register(src))
+}
+
+/// Parse `src` in an explicit register (the pragma line, if any, is stripped).
+fn parse_in(src: &str, reg: rune_parse::Register) -> rune_ast::Expr {
+    let body = strip_pragma(src);
+    match reg {
+        rune_parse::Register::Classic => match rune_parse::parse(body) {
+            Ok(a) => a,
+            Err(e) => { eprintln!("parse error: {}", e.message); std::process::exit(1); }
+        },
+        rune_parse::Register::Pure => match rune_parse_pure::parse(body) {
+            Ok(a) => a,
+            Err(e) => { eprintln!("parse error: {}", e.message); std::process::exit(1); }
+        },
+    }
+}
+
+/// Drop a leading `:: register: …` pragma line so the parser sees only code.
+fn strip_pragma(src: &str) -> &str {
+    if src.trim_start().starts_with(":: register:") {
+        match src.find('\n') {
+            Some(i) => &src[i + 1..],
+            None => "",
+        }
+    } else {
+        src
     }
 }
 

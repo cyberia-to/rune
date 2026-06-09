@@ -252,7 +252,16 @@ M1 complete. M2–M6 substantially implemented, M8 partially done. M7 skipped (n
   typed-`Gate` AST + call-site checking); runtime mold-gates wait on molds
   lowering to Nox (M6); `^-`/`^+` casts land with the pure register (M4).
 
-**M4** — pure register crate (rune-parse-pure) exists; 25 digraphs mapped to Expr variants
+**M4** — done. Both registers parse to one AST and execute.
+- `rune-parse-pure`: 25 digraphs (tall + flat). Verified: `fn double(x: @ud) { x * 2 }`
+  and `(|= x=@ud (mul x 2))` parse to the **same AST** (the completion signal).
+- `fmt` is bi-directional: detects the input register (pragma) and outputs
+  `--to=rust`/`--to=rune`, so pure↔classic round-trips both ways.
+- pure register now **executes**: `rune eval --pure '(mul 6 7)'` → 42; files with a
+  `:: register: rune` pragma run/check/fmt as pure (`Register::Pure` +
+  `detect_register`; the CLI dispatches since it has both parsers).
+- deferred: per-line register mixing in the REPL; `^-`/`^+` → `Expr::Cast` (the AST
+  variant exists; wiring it is small follow-up).
 
 **M5** (partial) — hint passthrough (opcode 16 body evaluates correctly); host stub (identity); scry stub (returns 0)
 

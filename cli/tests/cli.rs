@@ -92,6 +92,34 @@ fn eval_col_yields_multiple_chunks() {
 }
 
 #[test]
+fn eval_pure_register_runs() {
+    // `--pure` parses the sigil register and evaluates it.
+    let out = rune(&["eval", "--pure", "(mul 6 7)"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(stdout(&out).trim(), "42");
+}
+
+#[test]
+fn run_pure_register_via_pragma() {
+    let path = std::env::temp_dir().join("rune_cli_pragma.rune");
+    std::fs::write(&path, ":: register: rune\n(mul 8 8)").unwrap();
+    let out = rune(&["run", path.to_str().unwrap()]);
+    let _ = std::fs::remove_file(&path);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(stdout(&out).trim(), "64");
+}
+
+#[test]
+fn fmt_converts_pure_input_to_classic() {
+    let path = std::env::temp_dir().join("rune_cli_fmt_pure.rune");
+    std::fs::write(&path, ":: register: rune\n(mul x 2)").unwrap();
+    let out = rune(&["fmt", "--to=rust", path.to_str().unwrap()]);
+    let _ = std::fs::remove_file(&path);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(stdout(&out).trim(), "x * 2");
+}
+
+#[test]
 fn eval_parse_error_exits_nonzero() {
     let out = rune(&["eval", "6 *"]);
     assert!(!out.status.success());

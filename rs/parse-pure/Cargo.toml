@@ -12,3 +12,6 @@ path = "lib.rs"
 rune-ast     = { workspace = true }
 rune-lex     = { workspace = true }
 cyber-hemera = { workspace = true }
+
+[dev-dependencies]
+rune-parse = { workspace = true }

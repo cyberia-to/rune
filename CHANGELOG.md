@@ -8,9 +8,11 @@ milestones M1–M10 toward the Kelvin freeze (see `PLAN.md`).
 
 ### Added
 
-- **Two registers, one AST** — classic (Rust-like) and pure (Hoon-style digraph)
-  parsers both lower to the same Nox noun. `rune fmt --to=rune` / `--to=rust`
-  converts mechanically (M1, M4).
+- **Two registers, one AST (M4)** — classic (Rust-like) and pure (Hoon-style
+  digraph) both parse to the same AST and lower to the same Nox noun (verified:
+  `fn double(x: @ud) { x * 2 }` ≡ `(|= x=@ud (mul x 2))`). `fmt` is
+  bi-directional (`--to=rune`/`--to=rust`, either input register). Pure register
+  executes: `rune eval --pure …`, or a `:: register: rune` file pragma.
 - **Instant-start interpreter** — tree-walking evaluator over all 18 Nox
   reduction patterns; parse → lower → reduce with no compilation phase (M1).
 - **Subject model + cybermark scry (M2)** — `~self … ~world` resolve to their

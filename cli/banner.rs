@@ -45,7 +45,7 @@ pub fn help(color: bool) -> String {
     let mut o = banner(color);
     o.push('\n');
     o.push_str("  rune                        start the REPL\n");
-    o.push_str("  rune eval <expr>            evaluate one expression\n");
+    o.push_str("  rune eval [--pure] <expr>   evaluate one expression\n");
     o.push_str("  rune run <file>             interpret a program\n");
     o.push_str("  rune fmt [--to=…] <file>    format between registers (rust | rune)\n");
     o.push_str("  rune check <file>           type-check (mold) without running\n");

@@ -586,10 +586,33 @@ pub fn format_expr(expr: &rune_ast::Expr) -> String {
     }
 }
 
-pub enum Register { Classic }
+/// Which syntactic register a source is written in. Both lower to the same AST;
+/// dispatch to the matching parser lives in the CLI (which has both).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Register {
+    Classic,
+    Pure,
+}
 
-pub fn parse_with_register(src: &str, _reg: Register) -> Result<rune_ast::Expr, ParseError> {
-    parse(src)
+/// Detect the register from a leading pragma `:: register: rune` (pure) or
+/// `:: register: rust` (classic). Defaults to Classic when the first non-empty
+/// line is not a register pragma.
+pub fn detect_register(src: &str) -> Register {
+    for line in src.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix(":: register:") {
+            return if rest.trim() == "rune" {
+                Register::Pure
+            } else {
+                Register::Classic
+            };
+        }
+        break; // first content line is not a pragma
+    }
+    Register::Classic
 }
 
 #[cfg(test)]
