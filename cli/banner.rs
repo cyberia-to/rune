@@ -32,7 +32,7 @@ pub fn banner(color: bool) -> String {
     o.push_str(&line(C, "    ██╔══██╗██║   ██║██║╚██╗██║██╔══╝  \n"));
     o.push_str(&line(B, "    ██║  ██║╚██████╔╝██║ ╚████║███████╗\n"));
     o.push_str(&line(M, "    ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝\n"));
-    o.push_str(&line(W, "    open computation for the cybergraph\n"));
+    o.push_str(&line(W, "    the robot scripting language\n"));
     o.push('\n');
     o.push_str(&line(GR, "    Nox · 18-pattern tree reduction · Goldilocks field\n"));
     o.push_str(&line(GR, "    two registers (classic + pure) · one AST · instant start\n"));
@@ -55,16 +55,37 @@ pub fn help(color: bool) -> String {
     o
 }
 
-/// The meta-command list shown by `:help` inside the REPL.
+/// The categorized help shown by `:help` inside the REPL.
 pub fn repl_help(color: bool) -> String {
+    let head = |s: &str| paint(color, W, s);
     let g = |s: &str| paint(color, GR, s);
     let mut o = String::new();
-    o.push_str(&g("  :help          this list\n"));
-    o.push_str(&g("  :env           show accumulated bindings\n"));
-    o.push_str(&g("  :reset         clear all bindings\n"));
-    o.push_str(&g("  :quit          leave the REPL  (or Ctrl-D)\n"));
+
+    o.push_str(&head("  commands\n"));
+    o.push_str(&g("    :help               this list\n"));
+    o.push_str(&g("    :env                show bound names\n"));
+    o.push_str(&g("    :nox  <expr>        the Nox formula <expr> lowers to\n"));
+    o.push_str(&g("    :type <expr>        mold-check <expr>\n"));
+    o.push_str(&g("    :ast  <expr>        the parsed AST\n"));
+    o.push_str(&g("    :load <file>        run a file into the session\n"));
+    o.push_str(&g("    :reset              clear bindings\n"));
+    o.push_str(&g("    :quit               leave  (Ctrl-D)\n"));
     o.push('\n');
-    o.push_str(&g("  let x = 5      bind a name; it persists for later lines\n"));
-    o.push_str(&g("  x * 2         evaluate an expression against the bindings\n"));
+
+    o.push_str(&head("  builtins\n"));
+    o.push_str(&g("    text anno error log button col    prysm chunks\n"));
+    o.push_str(&g("    emit query link seal subscribe    acts\n"));
+    o.push_str(&g("    add sub mul lt gt                 arithmetic\n"));
+    o.push('\n');
+
+    o.push_str(&head("  editing\n"));
+    o.push_str(&g("    ↑ ↓ history    Ctrl-R search    Tab complete\n"));
+    o.push_str(&g("    multi-line continues while ( [ or \" stay open\n"));
+    o.push('\n');
+
+    o.push_str(&head("  examples\n"));
+    o.push_str(&g("    let x = 5           bind a name (persists for later lines)\n"));
+    o.push_str(&g("    x * 2               evaluate against the bindings\n"));
+    o.push_str(&g("    col(text(\"a\"), error(\"b\"))\n"));
     o
 }

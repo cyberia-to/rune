@@ -168,3 +168,21 @@ fn repl_survives_a_bad_line() {
     assert!(s.contains('✗'), "expected an error marker, got: {s}");
     assert!(s.contains("= 42"), "expected recovery, got: {s}");
 }
+
+#[test]
+fn repl_nox_shows_lowered_formula() {
+    // `:nox` reveals the Nox noun an expression lowers to.
+    let out = rune_stdin(&["repl"], ":nox 6 * 7\n:q\n");
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    // opcode 7 = mul, over quoted 6 and 7
+    assert!(stdout(&out).contains("[7 "), "got: {}", stdout(&out));
+}
+
+#[test]
+fn repl_help_is_categorized() {
+    let out = rune_stdin(&["repl"], ":help\n:q\n");
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("commands"), "got: {s}");
+    assert!(s.contains("builtins"), "got: {s}");
+}

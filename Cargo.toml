@@ -38,6 +38,10 @@ rune-compile    = { path = "rs/compile" }
 cyber-hemera = { path = "../hemera/rs" }
 tape         = { path = "../tape/impl/rust" }
 
+# cli deps
+reedline     = "0.45"
+nu-ansi-term = "0.50"
+
 # stack deps — added when compile path lands (M6)
 # nox   = { path = "../nox/rs" }
 # nebu  = { package = "cyb-nebu", path = "../strata/nebu/rs" }

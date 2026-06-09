@@ -25,10 +25,13 @@ milestones M1–M10 toward the Kelvin freeze (see `PLAN.md`).
   event, emitting as it runs, threading evolving state (M5).
 - **rune↔prysm bridge** (`rune-prysm`) — decodes a chunk-noun into `tape::Chunk`s,
   the exact wire format prysm renders. `rune eval` shows emitted/returned chunks.
-- **CLI** (`rune`) — a **REPL** (no-arg) with persistent `let` bindings, ANSI
-  chunk rendering, a colored banner, and `:help`/`:env`/`:reset`/`:quit`
-  meta-commands; plus `run` (event loop), `eval` (host-aware one-shot), `fmt`,
-  `check`, `--version`. End-to-end tests pin the command + REPL contract.
+- **CLI** (`rune`) — a **REPL** (no-arg) built on reedline (the nushell line
+  editor): persistent history, Ctrl-R search, tab-completion (builtins, acts,
+  bound names), syntax highlighting, multi-line input, and a plain fallback for
+  piped input. Persistent `let` bindings; ANSI chunk rendering; meta-commands
+  `:nox` (show the lowered Nox formula), `:type`, `:ast`, `:load`, `:env`,
+  `:reset`, `:help` (categorized). Plus `run`, `eval`, `fmt`, `check`,
+  `--version`. End-to-end tests pin the command + REPL contract.
 
 ### Notes
 

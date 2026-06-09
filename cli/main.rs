@@ -10,6 +10,7 @@
 mod banner;
 mod render;
 mod repl;
+mod repl_line;
 
 use std::io::IsTerminal;
 
