@@ -25,7 +25,7 @@
 ///   ~self  = 2   ~now   = 6    ~here  = 14   ~caps  = 30
 ///   ~code  = 62  ~libs  = 126  ~mem   = 254  ~world = 255
 use rune_ast::{Address, Expr, Noun, act, tag};
-use cyber_hemera as hemera;
+use rune_subject::{axis as slot, path_atom};
 
 #[derive(Debug)]
 pub struct LowerError {
@@ -173,23 +173,12 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         // Symbol → slot lookup
         // ------------------------------------------------------------------
         Expr::Sym(name) => {
-            match name.as_str() {
-                // Subject slot names
-                "~self"  | "self"  => Ok(axis(2)),
-                "~now"   | "now"   => Ok(axis(6)),
-                "~here"  | "here"  => Ok(axis(14)),
-                "~caps"  | "caps"  => Ok(axis(30)),
-                "~code"  | "code"  => Ok(axis(62)),
-                "~libs"  | "libs"  => Ok(axis(126)),
-                "~mem"   | "mem"   => Ok(axis(254)),
-                "~world" | "world" => Ok(axis(255)),
-                _ => {
-                    if let Some(ax) = env.lookup(&name) {
-                        Ok(axis(ax))
-                    } else {
-                        Err(lower_err(format!("unbound name: {name}")))
-                    }
-                }
+            if let Some(ax) = slot_axis(&name) {
+                Ok(axis(ax))
+            } else if let Some(ax) = env.lookup(&name) {
+                Ok(axis(ax))
+            } else {
+                Err(lower_err(format!("unbound name: {name}")))
             }
         }
 
@@ -323,7 +312,7 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         // Hint → [16 [tag-atom selector-f] body-f]
         // ------------------------------------------------------------------
         Expr::Hint { tag, selector, body } => {
-            let tag_atom = Noun::Atom(string_to_atom(&tag));
+            let tag_atom = Noun::Atom(path_atom(&tag));
             let sf = lower_in(*selector, env)?;
             let bf = lower_in(*body, env)?;
             Ok(Noun::cell(
@@ -342,10 +331,18 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         }
 
         // ------------------------------------------------------------------
-        // Address → [17 [path-atom [0 255]]]
-        // where 255 is ~world axis, path encodes the address string
+        // Address → [17 [1 path-atom] [0 255]]
+        // look (opcode 17) evaluates the path formula, so the key is quoted
+        // (`[1 k]`); the world formula `[0 255]` reads the ~world slot.
         // ------------------------------------------------------------------
         Expr::Address(addr) => {
+            // Reserved subject-slot names (`~self` … `~world`) read their axis,
+            // not a graph scry.
+            if let Address::Name(n) = &addr {
+                if let Some(ax) = slot_axis(n) {
+                    return Ok(axis(ax));
+                }
+            }
             let path = match addr {
                 Address::Particle(p) => p,
                 Address::Neuron(n)   => format!("@{n}"),
@@ -357,7 +354,7 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
             };
             Ok(Noun::cell(
                 Noun::Atom(17),
-                Noun::cell(Noun::Atom(string_to_atom(&path)), axis(255)),
+                Noun::cell(quote(path_atom(&path)), axis(slot::WORLD)),
             ))
         }
 
@@ -694,6 +691,22 @@ fn axis(n: u64) -> Noun {
     Noun::cell(Noun::Atom(0), Noun::Atom(n))
 }
 
+/// The subject-slot axis for a reserved name, with or without the `~` sigil
+/// (`~self` and `self` both → axis 2). `None` if not a reserved slot.
+fn slot_axis(name: &str) -> Option<u64> {
+    Some(match name.trim_start_matches('~') {
+        "self"  => slot::SELF,
+        "now"   => slot::NOW,
+        "here"  => slot::HERE,
+        "caps"  => slot::CAPS,
+        "code"  => slot::CODE,
+        "libs"  => slot::LIBS,
+        "mem"   => slot::MEM,
+        "world" => slot::WORLD,
+        _ => return None,
+    })
+}
+
 /// `[1 n]` — literal atom n
 fn quote(n: u64) -> Noun {
     Noun::cell(Noun::Atom(1), Noun::Atom(n))
@@ -824,15 +837,6 @@ fn prysm_col(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
         list_f = op3(ef, list_f);
     }
     Ok(op3(quote(tag::LIST), list_f))
-}
-
-// ---------------------------------------------------------------------------
-// Name→atom encoding via Poseidon2 (hemera).
-// Takes the first 8 bytes of the 32-byte digest as a little-endian u64.
-// ---------------------------------------------------------------------------
-fn string_to_atom(s: &str) -> u64 {
-    let digest = hemera::hash(s.as_bytes());
-    u64::from_le_bytes(digest.as_bytes()[..8].try_into().unwrap())
 }
 
 // ---------------------------------------------------------------------------

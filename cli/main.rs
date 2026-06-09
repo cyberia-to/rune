@@ -49,7 +49,7 @@ fn cmd_run(args: &[String]) {
 fn cmd_eval(args: &[String], color: bool) {
     let expr = args.first().unwrap_or_else(|| { eprintln!("usage: rune eval <expr>"); std::process::exit(1); });
     let formula = lower_ast(parse_ast(expr));
-    let subject = rune_subject::Subject::minimal().to_noun();
+    let subject = subject();
 
     // Collect acts as they fire; decode the final value too. This is the act
     // path end-to-end without the GUI — see `cyb/root/ward.md` for the seam.
@@ -109,6 +109,17 @@ fn cmd_check(args: &[String]) {
 
 // ── shared front-end ─────────────────────────────────────────────────────────
 
+/// The subject for CLI evaluation: a standalone subject (resolvable `~self` and
+/// `~here`) with a live `~now` injected from the system clock. `~world` stays
+/// empty until a graph source is wired.
+pub(crate) fn subject() -> rune_ast::Noun {
+    let mut s = rune_subject::Subject::standalone();
+    if let Ok(d) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        s.now = rune_ast::Noun::Atom(d.as_secs());
+    }
+    s.to_noun()
+}
+
 /// Read a source file or exit with its IO error.
 fn read_file(path: &str) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1); })
@@ -136,7 +147,7 @@ fn run_source_event(src: &str) {
     use rune_interp::event::{eval_step, resume, StepResult};
 
     let formula = lower_ast(parse_ast(src));
-    let subject = rune_subject::Subject::minimal().to_noun();
+    let subject = subject();
 
     let mut step = eval_step(&subject, &formula);
     loop {

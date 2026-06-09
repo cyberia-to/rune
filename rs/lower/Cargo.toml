@@ -10,7 +10,7 @@ path = "lib.rs"
 
 [dependencies]
 rune-ast     = { workspace = true }
-cyber-hemera = { workspace = true }
+rune-subject = { workspace = true }
 
 [dev-dependencies]
 rune-interp = { workspace = true }

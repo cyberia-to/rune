@@ -9,7 +9,8 @@ description = "rune subject model — ~self ~now ~here ~caps ~code ~libs ~mem ~w
 path = "lib.rs"
 
 [dependencies]
-rune-ast = { workspace = true }
+rune-ast     = { workspace = true }
+cyber-hemera = { workspace = true }
 
 [dev-dependencies]
 rune-interp = { workspace = true }

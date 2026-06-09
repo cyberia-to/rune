@@ -233,7 +233,14 @@ M1 complete. M2–M6 substantially implemented, M8 partially done. M7 skipped (n
 - lowering: all Expr variants including Trap/Loop (dynamic $ axis), Rebind (depth-d subject rebuild), Door/Arm, Match, Gate (call-site inlining for closures)
 - integration tests: double(5)=10, fibonacci(10)=55, factorial(5)=120, closures
 
-**M2** (partial) — subject model axis constants defined; hemera hash is a stub (wrapping hash of bytes)
+**M2** — done. Subject slots resolve and cybermark addresses scry the world.
+- `~self … ~world` lower to axis reads (reserved names resolve via `slot_axis`, with or without `~`)
+- `#path` / `@neuron` / `~name` addresses lower to `[17 [1 key] [0 255]]` — scry over `~world`
+- `rune_subject::path_atom` is the one address→key hash (real hemera Poseidon2); lower and the
+  `world` builder share it; `rune_subject::world(&[(path, val)])` builds a graph slice
+- `Subject::standalone()` — resolvable `~self`/`~here`; the CLI injects a live `~now`
+- fixed: the scry key was emitted unquoted (`[17 [k …]]`); `look` evaluates the path, so it is now
+  `[1 k]`. Verified: `rune eval '~self'` → neuron atom; `#cyber/truth` resolves through a populated world
 
 **M3** (partial) — base molds @ud, @da, #, @neuron; strata molds @nebu, @kuro, @jali, @trop, @genies; mold_and()
 
@@ -247,12 +254,11 @@ M1 complete. M2–M6 substantially implemented, M8 partially done. M7 skipped (n
 
 ### pending
 
-- M2: hemera hash integration (`~/cyber/hemera/rs` → real hash for opcode 15 and string_to_atom)
-- M2: scry (opcode 17) — look up path in subject's ~world slot (axis 255) instead of returning 0
-- M3: `rune check` command — static mold pass
-- M4: `rune fmt --to=rune` — pure register pretty-printer
-- M5: hint parking (HintHandle + event loop) — currently hint just evaluates body synchronously
-- M5: host WASM bridge (wasmi) — currently identity stub
-- M6: trident TIR emission for pure functions
+- M2: `~world` is empty in standalone — populated by a real graph source (cyb/bbg) later
+- M3: mold normalization at cast sites (`^-` / `^+`); remaining strata coverage
+- M5: deep hint parking (CPS suspend/resume) — shallow top-level parking exists (`eval_step`/`resume`)
+- M5: host WASM bridge (wasmi) — the generic `Host`/act seam is in; no wasmi yet
+- M6: trident TIR emission for pure functions (no `trident` dep wired)
+- M8: background compile + transparent swap (only result-memoization exists)
 - M9: zheng proof generation
 - M10: Kelvin freeze audit

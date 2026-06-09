@@ -22,9 +22,43 @@ fn run(src: &str) -> u64 {
     }
 }
 
+/// Parse + lower + eval `src` against an explicit subject noun, return u64.
+fn run_against(src: &str, subject: &rune_ast::Noun) -> u64 {
+    let expr = parse(src).unwrap_or_else(|e| panic!("parse error in {:?}: {}", src, e.message));
+    let formula = lower(expr).unwrap_or_else(|e| panic!("lower error in {:?}: {}", src, e.message));
+    match eval(subject, &formula).unwrap_or_else(|e| panic!("eval error in {:?}: {}", src, e.message)) {
+        rune_ast::Noun::Atom(n) => n,
+        _ => panic!("expected atom result for {:?}", src),
+    }
+}
+
 #[test]
 fn literal_42() {
     assert_eq!(run("42"), 42);
+}
+
+// ── M2: subject resolution + cybermark scry ─────────────────────────────────
+
+#[test]
+fn tilde_self_reads_the_self_slot() {
+    let mut s = Subject::minimal();
+    s.self_neuron = rune_ast::Noun::Atom(99);
+    assert_eq!(run_against("~self", &s.to_noun()), 99);
+}
+
+#[test]
+fn address_scries_world_for_its_value() {
+    // #cyber/truth threads through ~world and resolves to the stored value.
+    let mut s = Subject::minimal();
+    s.world = rune_subject::world(&[("cyber/truth", rune_ast::Noun::Atom(42))]);
+    assert_eq!(run_against("#cyber/truth", &s.to_noun()), 42);
+}
+
+#[test]
+fn address_miss_returns_zero() {
+    let mut s = Subject::minimal();
+    s.world = rune_subject::world(&[("cyber/truth", rune_ast::Noun::Atom(42))]);
+    assert_eq!(run_against("#cyber/rune", &s.to_noun()), 0);
 }
 
 #[test]

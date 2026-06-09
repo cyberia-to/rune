@@ -13,8 +13,12 @@ milestones M1–M10 toward the Kelvin freeze (see `PLAN.md`).
   converts mechanically (M1, M4).
 - **Instant-start interpreter** — tree-walking evaluator over all 18 Nox
   reduction patterns; parse → lower → reduce with no compilation phase (M1).
-- **Subject model** — `~self ~now ~here ~caps ~code ~libs ~mem ~world` slots with
-  reserved axes; cybermark address forms in the parser (M2).
+- **Subject model + cybermark scry (M2)** — `~self … ~world` resolve to their
+  axis (reserved names work with or without `~`); `#path`/`@neuron`/`~name`
+  addresses scry the `~world` slot via `look`. `rune_subject::path_atom` is the
+  one address→key hash (real hemera), shared by the lowerer and the
+  `rune_subject::world(&[(path, val)])` slice builder. `Subject::standalone()`
+  gives a resolvable `~self`/`~here`; the CLI injects a live `~now`.
 - **Mold system** — types as normalizing functions; base molds (`@ud @da @t
   @flag @p`) plus the strata algebra tower; `rune check` validates molds without
   running (M3).

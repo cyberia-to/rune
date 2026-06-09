@@ -14,7 +14,32 @@
 ///   126 = ~libs   — imported library cores
 ///   254 = ~mem    — persistent state (arbitrary noun)
 ///   255 = ~world  — cybergraph slice (visible particles and links)
+use cyber_hemera as hemera;
 use rune_ast::Noun;
+
+/// Hash an address path string to its `~world` key atom.
+///
+/// This is the single source of truth for address → key: the lowerer emits this
+/// same atom as the scry key for `#path` addresses, so a `~world` built with
+/// `path_atom` keys resolves under `look` (opcode 17). Truncates the hemera
+/// digest to its first 8 bytes (little-endian).
+pub fn path_atom(s: &str) -> u64 {
+    let digest = hemera::hash(s.as_bytes());
+    u64::from_le_bytes(digest.as_bytes()[..8].try_into().unwrap())
+}
+
+/// Build a `~world` graph-slice noun from `(path, value)` entries.
+///
+/// Layout: `[[key1 val1] [[key2 val2] … 0]]`, where `key = path_atom(path)` —
+/// the structure `scry_world` walks. No entries → `Atom(0)` (empty slice).
+pub fn world(entries: &[(&str, Noun)]) -> Noun {
+    let mut w = Noun::Atom(0);
+    for (path, val) in entries.iter().rev() {
+        let entry = Noun::cell(Noun::Atom(path_atom(path)), val.clone());
+        w = Noun::cell(entry, w);
+    }
+    w
+}
 
 /// A fully-populated subject noun.
 pub struct Subject {
@@ -42,12 +67,30 @@ impl Subject {
         Noun::cell(self.self_neuron.clone(), inner2)
     }
 
-    /// Minimal subject for standalone evaluation (no graph access).
+    /// Minimal subject — every slot `Atom(0)`. For pure evaluation that touches
+    /// no environment (and for tests).
     pub fn minimal() -> Self {
         Subject {
             self_neuron: Noun::Atom(0),
             now: Noun::Atom(0),
             here: Noun::Atom(0),
+            caps: Noun::Atom(0),
+            code: Noun::Atom(0),
+            libs: Noun::Atom(0),
+            mem: Noun::Atom(0),
+            world: Noun::Atom(0),
+        }
+    }
+
+    /// Standalone subject for evaluation outside the cybergraph: a resolvable
+    /// `~self` neuron and `~here` home, with the live slots (`~now` clock,
+    /// `~world` graph slice) left for the host to fill. The CLI injects a real
+    /// `~now`; `~world` stays empty until a graph source (cyb/bbg) is wired.
+    pub fn standalone() -> Self {
+        Subject {
+            self_neuron: Noun::Atom(path_atom("@self")),
+            now: Noun::Atom(0),
+            here: Noun::Atom(path_atom("~/")),
             caps: Noun::Atom(0),
             code: Noun::Atom(0),
             libs: Noun::Atom(0),
@@ -113,6 +156,32 @@ mod tests {
         assert_eq!(get(axis::LIBS),  a(15), "LIBS axis {}", axis::LIBS);
         assert_eq!(get(axis::MEM),   a(16), "MEM axis {}",  axis::MEM);
         assert_eq!(get(axis::WORLD), a(17), "WORLD axis {}", axis::WORLD);
+    }
+
+    #[test]
+    fn path_atom_is_stable_and_distinct() {
+        assert_eq!(path_atom("cyber/truth"), path_atom("cyber/truth"));
+        assert_ne!(path_atom("cyber/truth"), path_atom("cyber/rune"));
+        assert_ne!(path_atom("cyber/truth"), 0);
+    }
+
+    #[test]
+    fn world_keys_are_path_atoms() {
+        let w = world(&[("cyber/truth", a(42))]);
+        // [[key 42] 0]
+        let expected = Noun::cell(
+            Noun::cell(a(path_atom("cyber/truth")), a(42)),
+            a(0),
+        );
+        assert_eq!(w, expected);
+        assert_eq!(world(&[]), a(0));
+    }
+
+    #[test]
+    fn standalone_self_resolves_nonzero() {
+        let noun = Subject::standalone().to_noun();
+        let self_neuron = nox_axis(&noun, axis::SELF).expect("axis");
+        assert_ne!(self_neuron, a(0));
     }
 
     /// subject_slot_axis(n) must agree with the named constants.

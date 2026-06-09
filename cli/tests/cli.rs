@@ -47,6 +47,15 @@ fn eval_arithmetic_prints_atom() {
 }
 
 #[test]
+fn eval_self_resolves_to_a_neuron() {
+    // `~self` reads the subject's self slot — a real neuron, not 0.
+    let out = rune(&["eval", "~self"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let n: u64 = stdout(&out).trim().parse().expect("expected an atom");
+    assert_ne!(n, 0, "~self should resolve to a neuron");
+}
+
+#[test]
 fn eval_prysm_value_renders_as_chunk() {
     // A program whose *value* is a renderable noun decodes to a tape chunk and
     // renders as its text (no sigil noise; colour off because stdout is piped).

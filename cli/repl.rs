@@ -279,7 +279,7 @@ fn lower_only(src: &str) -> Result<rune_ast::Noun, String> {
 /// a human error string. Never panics — the REPL must survive bad input.
 fn eval_program(src: &str) -> Result<(Vec<tape::Chunk>, rune_ast::Noun), String> {
     let formula = lower_only(src)?;
-    let subject = rune_subject::Subject::minimal().to_noun();
+    let subject = crate::subject();
     let mut host = CollectHost { emitted: Vec::new() };
     let result = rune_interp::eval_with_host(&subject, &formula, &mut host)
         .map_err(|e| format!("eval: {}", e.message))?;
