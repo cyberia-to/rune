@@ -242,7 +242,15 @@ M1 complete. M2–M6 substantially implemented, M8 partially done. M7 skipped (n
 - fixed: the scry key was emitted unquoted (`[17 [k …]]`); `look` evaluates the path, so it is now
   `[1 k]`. Verified: `rune eval '~self'` → neuron atom; `#cyber/truth` resolves through a populated world
 
-**M3** (partial) — base molds @ud, @da, #, @neuron; strata molds @nebu, @kuro, @jali, @trop, @genies; mold_and()
+**M3** — done. Base molds (`@ud @da # @neuron @p @tas @t @flag`) + strata molds
+(`@nebu @kuro @jali @trop @genies`); `resolve()` registry; `rune check`.
+- the checker now runs the *real* molds on atom/cell literals (via `resolve` +
+  `normalize`), so every mold enforces its own constraint — `@flag = 2`,
+  `@ud = [1 2]`, etc. — not two hard-coded heuristics. Text literals keep the
+  structural check (they lower to a tape cell the atom molds don't model).
+- deferred: param/return annotations are parsed but not yet enforced (needs a
+  typed-`Gate` AST + call-site checking); runtime mold-gates wait on molds
+  lowering to Nox (M6); `^-`/`^+` casts land with the pure register (M4).
 
 **M4** — pure register crate (rune-parse-pure) exists; 25 digraphs mapped to Expr variants
 
@@ -255,7 +263,8 @@ M1 complete. M2–M6 substantially implemented, M8 partially done. M7 skipped (n
 ### pending
 
 - M2: `~world` is empty in standalone — populated by a real graph source (cyb/bbg) later
-- M3: mold normalization at cast sites (`^-` / `^+`); remaining strata coverage
+- M3: param/return annotation enforcement (typed Gate + call-site checking)
+- M3: runtime mold-gates (molds lowering to Nox — with M6)
 - M5: deep hint parking (CPS suspend/resume) — shallow top-level parking exists (`eval_step`/`resume`)
 - M5: host WASM bridge (wasmi) — the generic `Host`/act seam is in; no wasmi yet
 - M6: trident TIR emission for pure functions (no `trident` dep wired)

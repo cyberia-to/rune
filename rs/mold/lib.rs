@@ -246,6 +246,17 @@ pub fn resolve(name: &str) -> Option<Box<dyn Mold>> {
     }
 }
 
+/// Convert a literal expression (atom or nested cell of literals) to a noun for
+/// mold normalization. Non-literals (names, calls, text) return `None` — they
+/// are not statically known. Text is handled separately (tape representation).
+fn literal_noun(e: &Expr) -> Option<Noun> {
+    match e {
+        Expr::Atom(n) => Some(Noun::Atom(*n)),
+        Expr::Cell(h, t) => Some(Noun::cell(literal_noun(h)?, literal_noun(t)?)),
+        _ => None,
+    }
+}
+
 /// Static mold checker — walks AST and emits soft warnings (non-blocking).
 pub struct MoldChecker {
     bindings: Vec<(String, String)>, // name → mold_name
@@ -332,27 +343,29 @@ impl MoldChecker {
         }
     }
 
-    /// Catch obvious literal/mold mismatches at a typed binding site
-    /// (`let x: @mold = <literal>`).
+    /// Check a literal against a mold at a typed site (`let x: @mold = <lit>`,
+    /// `<lit> as @mold`). Atom and cell literals run the resolved mold for real,
+    /// so every mold enforces its own constraint (`@flag = 2`, `@ud = [1 2]`, …).
+    /// Text literals are checked structurally — they lower to a tape cell, which
+    /// the atom-based molds don't model, so a text mold is required by name.
     fn check_literal_mold(&mut self, value: &Expr, mold_name: &str) {
-        let text_molds = ["@t", "t", "@tas", "tas", "@p", "p"];
-        let is_text_mold = text_molds.contains(&mold_name);
-        match value {
-            // A text literal must bind to a text mold, never a numeric/atom one.
-            Expr::Text(_) if !is_text_mold => {
+        const TEXT_MOLDS: [&str; 6] = ["@t", "t", "@tas", "tas", "@p", "p"];
+        if let Expr::Text(_) = value {
+            if !TEXT_MOLDS.contains(&mold_name) {
                 self.errors.push(MoldError {
                     message: format!(
                         "mold error: text literal bound to `{mold_name}`, expected a text mold (@t)"
                     ),
                 });
             }
-            // A cell can't satisfy @ud (a bare unsigned integer).
-            Expr::Cell(_, _) if mold_name == "@ud" || mold_name == "ud" => {
+            return;
+        }
+        if let (Some(mold), Some(noun)) = (resolve(mold_name), literal_noun(value)) {
+            if let Err(e) = mold.normalize(&noun) {
                 self.errors.push(MoldError {
-                    message: "mold error: cell bound to `@ud`, expected an atom".into(),
+                    message: format!("mold error: {}", e.message),
                 });
             }
-            _ => {}
         }
     }
 
@@ -430,6 +443,38 @@ mod tests {
         assert!(resolve("@tas").is_some());
         assert!(resolve("@t").is_some());
         assert!(resolve("@flag").is_some());
+    }
+
+    /// `let x: <mold> = <value>` and return the checker's errors.
+    fn checked(mold: &str, value: Expr) -> Vec<MoldError> {
+        let e = Expr::Let {
+            name: "x".into(),
+            mold: Some(Box::new(Expr::Sym(mold.into()))),
+            value: Box::new(value),
+            body: Box::new(Expr::Sym("x".into())),
+        };
+        MoldChecker::check(&e)
+    }
+
+    #[test]
+    fn checker_runs_the_real_mold_on_atom_literals() {
+        // @flag enforces 0/1 — caught via the registry, not a heuristic.
+        assert!(!checked("@flag", Expr::Atom(2)).is_empty());
+        assert!(checked("@flag", Expr::Atom(1)).is_empty());
+        assert!(checked("@flag", Expr::Atom(0)).is_empty());
+    }
+
+    #[test]
+    fn checker_rejects_cell_for_atom_mold() {
+        let cell = Expr::Cell(Box::new(Expr::Atom(1)), Box::new(Expr::Atom(2)));
+        assert!(!checked("@ud", cell).is_empty());
+        assert!(checked("@ud", Expr::Atom(5)).is_empty());
+    }
+
+    #[test]
+    fn checker_text_requires_a_text_mold() {
+        assert!(!checked("@ud", Expr::Text("hi".into())).is_empty());
+        assert!(checked("@t", Expr::Text("hi".into())).is_empty());
     }
 
     #[test]

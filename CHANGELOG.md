@@ -19,9 +19,11 @@ milestones M1–M10 toward the Kelvin freeze (see `PLAN.md`).
   one address→key hash (real hemera), shared by the lowerer and the
   `rune_subject::world(&[(path, val)])` slice builder. `Subject::standalone()`
   gives a resolvable `~self`/`~here`; the CLI injects a live `~now`.
-- **Mold system** — types as normalizing functions; base molds (`@ud @da @t
-  @flag @p`) plus the strata algebra tower; `rune check` validates molds without
-  running (M3).
+- **Mold system (M3)** — types as normalizing functions; base molds (`@ud @da @t
+  @flag @p @tas @neuron #`) plus the strata algebra tower (`@nebu @kuro @jali
+  @trop @genies`); `rune check` validates without running. The checker runs the
+  real molds on literals, so each enforces its own constraint (`@flag = 2`,
+  `@ud = [1 2]` are caught), not just hard-coded heuristics.
 - **Acts** — the pure/world boundary: opcode-16 act tags (`emit query link seal
   subscribe host`) are performed through a `Host` trait (`eval_with_host`); pure
   `eval` no-ops them via `DenyHost`. The seam the cyb ward plugs into (M5).
