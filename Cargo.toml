@@ -36,7 +36,7 @@ rune-compile    = { path = "rs/compile" }
 
 # stack deps
 cyber-hemera = { path = "../hemera/rs" }
-tape         = { path = "../tape/impl/rust" }
+tape         = { package = "cyber-tape", path = "../tape/impl/rust" }
 
 # cli deps
 reedline     = "0.45"

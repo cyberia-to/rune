@@ -15,4 +15,4 @@ path = "lib.rs"
 
 [dependencies]
 rune-ast = { workspace = true }
-tape     = { path = "../../../tape/impl/rust" }
+tape     = { package = "cyber-tape", path = "../../../tape/impl/rust" }
