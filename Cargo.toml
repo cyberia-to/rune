@@ -35,7 +35,7 @@ rune-mold       = { path = "rs/mold" }
 rune-compile    = { path = "rs/compile" }
 
 # stack deps
-cyber-hemera = { path = "../hemera/rs" }
+cyber-hemera = { version = "0.3", path = "../hemera/rs" }
 tape         = { package = "cyber-tape", path = "../tape/impl/rust" }
 
 # cli deps
