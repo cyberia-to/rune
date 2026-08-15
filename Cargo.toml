@@ -23,16 +23,16 @@ resolver = "3"
 license-file = "LICENSE"
 
 [workspace.dependencies]
-rune-ast        = { path = "rs/ast" }
-rune-lex        = { path = "rs/lex" }
-rune-parse      = { path = "rs/parse" }
-rune-parse-pure = { path = "rs/parse-pure" }
-rune-lower      = { path = "rs/lower" }
-rune-prysm      = { path = "rs/prysm" }
-rune-interp     = { path = "rs/interp" }
-rune-subject    = { path = "rs/subject" }
-rune-mold       = { path = "rs/mold" }
-rune-compile    = { path = "rs/compile" }
+rune-ast        = { version = "0.1.0", path = "rs/ast" }
+rune-lex        = { version = "0.1.0", path = "rs/lex" }
+rune-parse      = { version = "0.1.0", path = "rs/parse" }
+rune-parse-pure = { version = "0.1.0", path = "rs/parse-pure" }
+rune-lower      = { version = "0.1.0", path = "rs/lower" }
+rune-prysm      = { version = "0.1.0", path = "rs/prysm" }
+rune-interp     = { version = "0.1.0", path = "rs/interp" }
+rune-subject    = { version = "0.1.0", path = "rs/subject" }
+rune-mold       = { version = "0.1.0", path = "rs/mold" }
+rune-compile    = { version = "0.1.0", path = "rs/compile" }
 
 # stack deps
 cyber-hemera = { version = "0.3", path = "../hemera/rs" }
