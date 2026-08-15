@@ -2,7 +2,7 @@
 name = "rune-lower"
 version = "0.1.0"
 edition = "2021"
-license.workspace = true
+license-file.workspace = true
 description = "rune lowering — AST to Nox noun (formula)"
 
 [lib]

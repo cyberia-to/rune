@@ -20,7 +20,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-license = "Cyber"
+license-file = "LICENSE"
 
 [workspace.dependencies]
 rune-ast        = { path = "rs/ast" }
@@ -44,4 +44,4 @@ nu-ansi-term = "0.50"
 
 # stack deps — added when compile path lands (M6)
 # nox   = { path = "../nox/rs" }
-# nebu  = { package = "cyb-nebu", path = "../strata/nebu/rs" }
+# nebu  = { package = "strata-nebu", path = "../strata/nebu/rs" }

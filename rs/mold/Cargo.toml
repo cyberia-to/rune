@@ -2,7 +2,7 @@
 name = "rune-mold"
 version = "0.1.0"
 edition = "2021"
-license.workspace = true
+license-file.workspace = true
 description = "rune mold system — types as runtime normalizing functions"
 
 [lib]

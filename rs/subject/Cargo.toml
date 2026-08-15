@@ -2,7 +2,7 @@
 name = "rune-subject"
 version = "0.1.0"
 edition = "2021"
-license.workspace = true
+license-file.workspace = true
 description = "rune subject model — ~self ~now ~here ~caps ~code ~libs ~mem ~world"
 
 [lib]
