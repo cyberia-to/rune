@@ -14,4 +14,4 @@ rune-lex     = { workspace = true }
 cyber-hemera = { workspace = true }
 
 [dev-dependencies]
-rune-parse = { workspace = true }
+rune-parse = { path = "../parse" }

@@ -13,4 +13,4 @@ rune-ast     = { workspace = true }
 rune-subject = { workspace = true }
 
 [dev-dependencies]
-rune-interp = { workspace = true }
+rune-interp = { path = "../interp" }

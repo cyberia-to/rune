@@ -13,6 +13,6 @@ rune-ast     = { workspace = true }
 cyber-hemera = { workspace = true }
 
 [dev-dependencies]
-rune-parse   = { workspace = true }
-rune-lower   = { workspace = true }
-rune-subject = { workspace = true }
+rune-parse   = { path = "../parse" }
+rune-lower   = { path = "../lower" }
+rune-subject = { path = "../subject" }
