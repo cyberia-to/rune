@@ -10,7 +10,7 @@
 //!   subject on resume.  Deeply nested hints inside the body run synchronously
 //!   on the resumed step; full deep parking is M5b (later).
 
-use crate::{eval_with_host, Host, InterpError};
+use crate::{eval_with_authority, Host, InterpError};
 use rune_ast::Noun;
 
 /// Result of a single evaluation step.
@@ -92,9 +92,10 @@ pub fn run_cell(
     source: &mut MockEventSource,
 ) -> Result<Noun, InterpError> {
     let mut state = init_state;
+    let caps = crate::axis(base, rune_ast::act::CAPS_AXIS).unwrap_or(Noun::Atom(0));
     for event in source.by_ref() {
         let subject = Noun::cell(event, Noun::cell(state.clone(), base.clone()));
-        state = eval_with_host(&subject, gate, host)?;
+        state = eval_with_authority(&subject, gate, host, &caps)?;
     }
     Ok(state)
 }
@@ -106,7 +107,9 @@ pub struct MockEventSource {
 
 impl MockEventSource {
     pub fn new(events: Vec<Noun>) -> Self {
-        MockEventSource { events: events.into() }
+        MockEventSource {
+            events: events.into(),
+        }
     }
 }
 
@@ -140,14 +143,19 @@ fn step_hint(subject: &Noun, rest: &Noun) -> StepResult {
     StepResult::Yield {
         tag,
         selector,
-        continuation: Continuation { subject: subject.clone(), formula: body },
+        continuation: Continuation {
+            subject: subject.clone(),
+            formula: body,
+        },
     }
 }
 
 fn pair(noun: &Noun) -> Result<(Noun, Noun), InterpError> {
     match noun {
         Noun::Cell(h, t) => Ok((*h.clone(), *t.clone())),
-        _ => Err(InterpError { message: "event: expected cell".into() }),
+        _ => Err(InterpError {
+            message: "event: expected cell".into(),
+        }),
     }
 }
 
@@ -156,8 +164,12 @@ mod tests {
     use super::*;
     use rune_ast::Noun::Atom;
 
-    fn a(n: u64) -> Noun { Noun::Atom(n) }
-    fn c(h: Noun, t: Noun) -> Noun { Noun::cell(h, t) }
+    fn a(n: u64) -> Noun {
+        Noun::Atom(n)
+    }
+    fn c(h: Noun, t: Noun) -> Noun {
+        Noun::cell(h, t)
+    }
 
     #[test]
     fn pure_formula_completes() {
@@ -180,7 +192,9 @@ mod tests {
 
         let step = eval_step(&a(0), &formula);
         match step {
-            StepResult::Yield { tag, continuation, .. } => {
+            StepResult::Yield {
+                tag, continuation, ..
+            } => {
                 assert_eq!(tag, 99);
                 let resumed = resume(continuation, a(7));
                 assert!(matches!(resumed, StepResult::Done(Atom(42))));
@@ -216,9 +230,16 @@ mod tests {
     #[test]
     fn run_cell_reacts_per_event() {
         use rune_ast::act;
-        struct Rec { emitted: Vec<Noun> }
+        struct Rec {
+            emitted: Vec<Noun>,
+        }
         impl Host for Rec {
-            fn perform(&mut self, _act: u64, args: &Noun, _caps: &Noun) -> Result<Noun, InterpError> {
+            fn perform(
+                &mut self,
+                _act: u64,
+                args: &Noun,
+                _caps: &Noun,
+            ) -> Result<Noun, InterpError> {
                 self.emitted.push(args.clone());
                 Ok(Noun::Atom(0))
             }
@@ -226,14 +247,17 @@ mod tests {
         // cell gate: emit(event) then return state+1
         //   subject after emit = [result [event [state base]]] → state at axis 14
         //   [16 [EMIT [0 2]] [5 [0 14] [1 1]]]
-        let gate = c(a(16), c(
-            c(a(act::EMIT), c(a(0), a(2))),
-            c(a(5), c(c(a(0), a(14)), c(a(1), a(1)))),
-        ));
+        let gate = c(
+            a(16),
+            c(
+                c(a(act::EMIT), c(a(0), a(2))),
+                c(a(5), c(c(a(0), a(14)), c(a(1), a(1)))),
+            ),
+        );
         let mut host = Rec { emitted: vec![] };
         let mut src = MockEventSource::new(vec![a(10), a(20), a(30)]);
         let final_state = run_cell(&a(0), &gate, a(0), &mut host, &mut src).unwrap();
         assert_eq!(host.emitted, vec![a(10), a(20), a(30)]); // emitted each event
-        assert_eq!(final_state, a(3));                        // state advanced 0→3
+        assert_eq!(final_state, a(3)); // state advanced 0→3
     }
 }
