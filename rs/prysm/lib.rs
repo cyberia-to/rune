@@ -71,22 +71,30 @@ fn row_cells(payload: &Noun) -> Vec<Chunk> {
 }
 
 fn table_rows(payload: &Noun) -> Vec<Chunk> {
-    let mut out = Vec::new();
     let mut first = true;
+    collect_table_rows(payload, &mut first)
+}
+
+fn collect_table_rows(payload: &Noun, first: &mut bool) -> Vec<Chunk> {
+    let mut out = Vec::new();
     let mut cur = payload;
     loop {
         match cur {
             Noun::Cell(elem, rest) => {
                 if let Noun::Cell(h, tail) = elem.as_ref() {
                     if matches!(h.as_ref(), Noun::Atom(t) if *t == tag::LIST) {
-                        out.extend(table_rows(tail));
+                        // query("table-body") lands here as a nested list.
+                        // first must survive the splice, or the first data
+                        // row becomes a second header — the garbage after
+                        // "when" (particle:hex leaking into the caption).
+                        out.extend(collect_table_rows(tail, first));
                         cur = rest.as_ref();
                         continue;
                     }
                     if matches!(h.as_ref(), Noun::Atom(t) if *t == tag::ROW) {
                         let cells = row_cells(tail);
-                        let (sig, rend) = if first {
-                            first = false;
+                        let (sig, rend) = if *first {
+                            *first = false;
                             (sigil::FAS, render::STRUCT)
                         } else {
                             (sigil::COL, render::STRUCT)
@@ -309,6 +317,33 @@ mod tests {
         assert_eq!(
             (rows[0].sigil, rows[0].render),
             (sigil::FAS, render::STRUCT)
+        );
+    }
+
+    #[test]
+    fn nested_body_list_does_not_mint_a_second_header() {
+        let header = Noun::cell(
+            Noun::Atom(tag::ROW),
+            Noun::cell(tape("when"), Noun::Atom(0)),
+        );
+        let data = Noun::cell(
+            Noun::Atom(tag::ROW),
+            Noun::cell(tape("particle:ff"), Noun::Atom(0)),
+        );
+        let body = Noun::cell(Noun::Atom(tag::LIST), Noun::cell(data, Noun::Atom(0)));
+        let n = Noun::cell(
+            Noun::Atom(tag::TABLE),
+            Noun::cell(header, Noun::cell(body, Noun::Atom(0))),
+        );
+        let rows = tape::decode_nested(&noun_to_chunk(&n).unwrap().payload);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            (rows[0].sigil, rows[0].render),
+            (sigil::FAS, render::STRUCT)
+        );
+        assert_eq!(
+            (rows[1].sigil, rows[1].render),
+            (sigil::COL, render::STRUCT)
         );
     }
 }
