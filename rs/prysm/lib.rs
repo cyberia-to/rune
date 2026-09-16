@@ -60,6 +60,48 @@ fn text_of(n: &Noun) -> String {
     String::from_utf8_lossy(&noun_to_bytes(n)).into_owned()
 }
 
+fn tr_cells(payload: &Noun) -> Vec<Chunk> {
+    let mut cells = Vec::new();
+    let mut cur = payload;
+    while let Noun::Cell(elem, rest) = cur {
+        cells.push(Chunk::text(&text_of(elem)));
+        cur = rest.as_ref();
+    }
+    cells
+}
+
+fn table_rows(payload: &Noun) -> Vec<Chunk> {
+    let mut out = Vec::new();
+    let mut first = true;
+    let mut cur = payload;
+    loop {
+        match cur {
+            Noun::Cell(elem, rest) => {
+                if let Noun::Cell(h, tail) = elem.as_ref() {
+                    if matches!(h.as_ref(), Noun::Atom(t) if *t == tag::LIST) {
+                        out.extend(table_rows(tail));
+                        cur = rest.as_ref();
+                        continue;
+                    }
+                    if matches!(h.as_ref(), Noun::Atom(t) if *t == tag::TR) {
+                        let cells = tr_cells(tail);
+                        let (sig, rend) = if first {
+                            first = false;
+                            (sigil::FAS, render::STRUCT)
+                        } else {
+                            (sigil::COL, render::STRUCT)
+                        };
+                        out.push(Chunk::new(sig, rend, encode_nested(&cells)));
+                    }
+                }
+                cur = rest.as_ref();
+            }
+            _ => break,
+        }
+    }
+    out
+}
+
 /// Decode a single prysm element noun `[tag payload]` into one [`Chunk`].
 /// Returns `None` if the noun is not a recognised element.
 pub fn noun_to_chunk(n: &Noun) -> Option<Chunk> {
@@ -109,6 +151,20 @@ pub fn noun_to_chunk(n: &Noun) -> Option<Chunk> {
                 cur = rest.as_ref();
             }
             Chunk::new(sigil::LUS, render::COMPONENT, encode_nested(&kids))
+        }
+        tag::TABLE => Chunk::new(
+            sigil::HAX,
+            render::TABLE,
+            encode_nested(&table_rows(payload)),
+        ),
+        tag::TR => {
+            let mut cells = Vec::new();
+            let mut cur = payload.as_ref();
+            while let Noun::Cell(elem, rest) = cur {
+                cells.push(Chunk::text(&text_of(elem)));
+                cur = rest.as_ref();
+            }
+            Chunk::new(sigil::COL, render::STRUCT, encode_nested(&cells))
         }
         _ => return None,
     };
@@ -246,5 +302,19 @@ mod tests {
         let chunks = noun_to_chunks(&n);
         assert_eq!(chunks.len(), 1);
         assert_eq!(&chunks[0].payload[..], b"x");
+    }
+
+    #[test]
+    fn table_first_tr_is_header() {
+        let header = Noun::cell(Noun::Atom(tag::TR), Noun::cell(tape("name"), Noun::Atom(0)));
+        let n = Noun::cell(Noun::Atom(tag::TABLE), Noun::cell(header, Noun::Atom(0)));
+        let c = noun_to_chunk(&n).unwrap();
+        assert_eq!((c.sigil, c.render), (sigil::HAX, render::TABLE));
+        let rows = tape::decode_nested(&c.payload);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            (rows[0].sigil, rows[0].render),
+            (sigil::FAS, render::STRUCT)
+        );
     }
 }
