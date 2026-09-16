@@ -74,7 +74,7 @@ pub fn run_with_events(
     }
 }
 
-/// Drive a **cell** — the reactive entrypoint. A cell is a rune gate invoked
+/// Drive a reactive gate invoked
 /// once per event, emitting chunks (via `host`) as it runs and returning its
 /// next state. The driver threads that state forward and feeds the next event,
 /// until the source is exhausted; the final state is returned.
@@ -84,7 +84,7 @@ pub fn run_with_events(
 /// …) at axis 7. Unlike hint parking, this needs no continuation capture — each
 /// tick runs to completion, performing its acts — which is exactly the shape of
 /// a surface that re-renders on input.
-pub fn run_cell(
+pub fn run_events(
     base: &Noun,
     gate: &Noun,
     init_state: Noun,
@@ -98,6 +98,19 @@ pub fn run_cell(
         state = eval_with_authority(&subject, gate, host, &caps)?;
     }
     Ok(state)
+}
+
+/// Compatibility entry point from rune-interp 0.1; remove in 0.2.
+/// The gate is an event driver with state, without a separate subject identity.
+#[deprecated(since = "0.1.0", note = "use run_events; removed in 0.2")]
+pub fn run_cell(
+    base: &Noun,
+    gate: &Noun,
+    init_state: Noun,
+    host: &mut dyn Host,
+    source: &mut MockEventSource,
+) -> Result<Noun, InterpError> {
+    run_events(base, gate, init_state, host, source)
 }
 
 /// A mock event source for development and testing (queued nouns).
@@ -228,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn run_cell_reacts_per_event() {
+    fn run_events_reacts_per_event() {
         use rune_ast::act;
         struct Rec {
             emitted: Vec<Noun>,
@@ -256,7 +269,7 @@ mod tests {
         );
         let mut host = Rec { emitted: vec![] };
         let mut src = MockEventSource::new(vec![a(10), a(20), a(30)]);
-        let final_state = run_cell(&a(0), &gate, a(0), &mut host, &mut src).unwrap();
+        let final_state = run_events(&a(0), &gate, a(0), &mut host, &mut src).unwrap();
         assert_eq!(host.emitted, vec![a(10), a(20), a(30)]); // emitted each event
         assert_eq!(final_state, a(3)); // state advanced 0→3
     }

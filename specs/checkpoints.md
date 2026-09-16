@@ -1,9 +1,14 @@
 ---
 title: bounded interpreter checkpoints
-tags: rune, cell, spec
+tags: rune, neuron, prog, spec
 status: implementation
 ---
 # bounded interpreter checkpoints
+
+The ephemeral reactive gate driver is `event::run_events`. Its state/subject
+layout and trusted base authority are unchanged. `run_cell` is a deprecated 0.1
+forwarder scheduled for removal in 0.2; it defines no runtime identity. Durable
+prog/job recovery is owned by the neuron adapter through the bounded machine.
 
 The machine adapter is an explicit reduction stack with finite step, data-node,
 depth and frame limits. It evaluates the interpreter's opcodes 0–17. Its ABI pins
@@ -26,7 +31,7 @@ excess depth/nodes, unknown frames and incompatible revisions.
 The host supplies limits again on restore and verifies the artifact against the
 owning definition/history. Checkpoint bytes contain no live authority handle.
 The machine never dispatches effects itself. The synchronous eval_with_authority
-API binds host authority outside subject rewriting; run_cell binds from its
+API binds host authority outside subject rewriting; run_events binds from its
 mounted base before constructing event/state subjects.
 
 Logical node/frame limits bound interpreter state; a reduction can temporarily

@@ -1,5 +1,5 @@
 use rune_ast::{act, Noun};
-use rune_interp::event::{run_cell, MockEventSource};
+use rune_interp::event::{run_events, MockEventSource};
 use rune_interp::{eval_with_authority, eval_with_host, Host, InterpError};
 use rune_subject::Subject;
 
@@ -35,7 +35,7 @@ fn sequential_nested_and_reactive_acts_keep_host_authority() {
     assert_eq!(host.0, vec![a(13), a(13)]);
     host.0.clear();
     let mut events = MockEventSource::new(vec![a(1), a(2)]);
-    run_cell(&subject(), &gate, a(0), &mut host, &mut events).unwrap();
+    run_events(&subject(), &gate, a(0), &mut host, &mut events).unwrap();
     assert_eq!(host.0, vec![a(13); 4]);
     host.0.clear();
     let compose = c(a(2), c(c(a(1), a(999)), c(a(1), gate)));
