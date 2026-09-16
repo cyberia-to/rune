@@ -36,7 +36,7 @@ rune-compile    = { version = "0.1.0", path = "rs/compile" }
 
 # stack deps
 cyber-hemera = { version = "0.3", path = "../hemera/rs" }
-tape         = { package = "tade", version = "0.1", path = "../tade/impl/rust" }
+tade         = { version = "0.1", path = "../tade/impl/rust" }
 
 # cli deps
 reedline     = "0.45"

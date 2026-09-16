@@ -15,4 +15,4 @@ path = "lib.rs"
 
 [dependencies]
 rune-ast = { workspace = true }
-tape     = { package = "tade", version = "0.1", path = "../../../tade/impl/rust" }
+tade     = { version = "0.1", path = "../../../tade/impl/rust" }

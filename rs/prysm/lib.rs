@@ -2,7 +2,7 @@
 //!
 //! A rune program that renders UI evaluates to a **chunk-noun** — a noun tree
 //! using the `rune_ast::tag` ABI. This crate decodes that noun into
-//! [`tape::Chunk`]s, the exact wire format prysm's `dispatch` renders (to wgpu
+//! [`tade::Chunk`]s, the exact wire format prysm's `dispatch` renders (to wgpu
 //! cells, ansi, or html). It is the only coupling between rune and prysm: rune
 //! emits nouns, prysm renders chunks, and `noun_to_chunks` is the seam.
 //!
@@ -10,11 +10,11 @@
 //!   rune program ──lower──> Nox formula ──eval──> chunk-noun
 //!                                                     │  noun_to_chunks
 //!                                                     ▼
-//!                                            Vec<tape::Chunk> ──StreamChannel──> prysm::dispatch
+//!                                            Vec<tade::Chunk> ──StreamChannel──> prysm::dispatch
 //! ```
 
 use rune_ast::{tag, Noun};
-use tape::{bytes::Bytes, encode_nested, render, sigil, Chunk};
+use tade::{bytes::Bytes, encode_nested, render, sigil, Chunk};
 
 /// Decode a `tape`/cord payload noun into raw bytes.
 ///
@@ -251,7 +251,7 @@ mod tests {
         let c = noun_to_chunk(&n).unwrap();
         assert_eq!((c.sigil, c.render), (sigil::ZAP, render::COMPONENT));
         // Inner: annotation(label) + text(target) — matches prysm action::spawn.
-        let inner = tape::decode_nested(&c.payload);
+        let inner = tade::decode_nested(&c.payload);
         assert_eq!(inner.len(), 2);
         assert_eq!(
             (inner[0].sigil, inner[0].render),
@@ -287,7 +287,7 @@ mod tests {
         );
         let c = noun_to_chunk(&n).unwrap();
         assert_eq!((c.sigil, c.render), (sigil::BUC, render::COMPONENT));
-        let inner = tape::decode_nested(&c.payload);
+        let inner = tade::decode_nested(&c.payload);
         assert_eq!(inner.len(), 2);
         assert_eq!(&inner[0].payload[..], b"12");
         assert_eq!(&inner[1].payload[..], b"particles");
@@ -312,7 +312,7 @@ mod tests {
         let n = Noun::cell(Noun::Atom(tag::TABLE), Noun::cell(header, Noun::Atom(0)));
         let c = noun_to_chunk(&n).unwrap();
         assert_eq!((c.sigil, c.render), (sigil::HAX, render::TABLE));
-        let rows = tape::decode_nested(&c.payload);
+        let rows = tade::decode_nested(&c.payload);
         assert_eq!(rows.len(), 1);
         assert_eq!(
             (rows[0].sigil, rows[0].render),
@@ -335,7 +335,7 @@ mod tests {
             Noun::Atom(tag::TABLE),
             Noun::cell(header, Noun::cell(body, Noun::Atom(0))),
         );
-        let rows = tape::decode_nested(&noun_to_chunk(&n).unwrap().payload);
+        let rows = tade::decode_nested(&noun_to_chunk(&n).unwrap().payload);
         assert_eq!(rows.len(), 2);
         assert_eq!(
             (rows[0].sigil, rows[0].render),
