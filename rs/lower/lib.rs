@@ -459,7 +459,9 @@ fn lower_expression(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
                     "error" => return prysm_unary(tag::ERROR, &args, env),
                     "log" => return prysm_unary(tag::LOG, &args, env),
                     "button" => return prysm_button(&args, env),
+                    "stat" => return prysm_stat(&args, env),
                     "col" => return prysm_col(&args, env),
+                    "row" => return prysm_row(&args, env),
                     // act builtins — request a world-touch through the host/ward.
                     // `emit(x)` → [16 [act args-f] [0 2]] → perform, return result.
                     "emit" => return act_unary(act::EMIT, &args, env),
@@ -910,6 +912,29 @@ fn act_unary(act_tag: u64, args: &[Expr], env: &Env) -> Result<Noun, LowerError>
     }
     let args_f = lower_in(args[0].clone(), env)?;
     Ok(act_formula(act_tag, args_f))
+}
+
+/// `stat(value, caption)` → `[STAT [value caption]]`.
+fn prysm_stat(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
+    if args.len() != 2 {
+        return Err(lower_err(format!(
+            "stat requires 2 arguments, got {}",
+            args.len()
+        )));
+    }
+    let value = lower_in(args[0].clone(), env)?;
+    let caption = lower_in(args[1].clone(), env)?;
+    Ok(op3(quote(tag::STAT), op3(value, caption)))
+}
+
+/// `row(e1, .., en)` → `[ROW e1 [e2 [.. 0]]]`.
+fn prysm_row(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
+    let mut list_f = quote(0);
+    for a in args.iter().rev() {
+        let ef = lower_in(a.clone(), env)?;
+        list_f = op3(ef, list_f);
+    }
+    Ok(op3(quote(tag::ROW), list_f))
 }
 
 /// `col(e1, .., en)` → `[LIST e1 [e2 [.. 0]]]` — a null-terminated element list.

@@ -13,7 +13,7 @@
 //!                                            Vec<tape::Chunk> ──StreamChannel──> prysm::dispatch
 //! ```
 
-use rune_ast::{Noun, tag};
+use rune_ast::{tag, Noun};
 use tape::{bytes::Bytes, encode_nested, render, sigil, Chunk};
 
 /// Decode a `tape`/cord payload noun into raw bytes.
@@ -63,19 +63,52 @@ fn text_of(n: &Noun) -> String {
 /// Decode a single prysm element noun `[tag payload]` into one [`Chunk`].
 /// Returns `None` if the noun is not a recognised element.
 pub fn noun_to_chunk(n: &Noun) -> Option<Chunk> {
-    let Noun::Cell(head, payload) = n else { return None };
-    let Noun::Atom(t) = head.as_ref() else { return None };
+    let Noun::Cell(head, payload) = n else {
+        return None;
+    };
+    let Noun::Atom(t) = head.as_ref() else {
+        return None;
+    };
     let chunk = match *t {
-        tag::TEXT  => Chunk::text(&text_of(payload)),
-        tag::ANNO  => Chunk::annotation(&text_of(payload)),
+        tag::TEXT => Chunk::text(&text_of(payload)),
+        tag::ANNO => Chunk::annotation(&text_of(payload)),
         tag::ERROR => Chunk::error(&text_of(payload)),
-        tag::LOG   => Chunk::new(sigil::DOT, render::LOG, Bytes::from(noun_to_bytes(payload))),
+        tag::LOG => Chunk::new(sigil::DOT, render::LOG, Bytes::from(noun_to_bytes(payload))),
         tag::BUTTON => {
             // payload = [label-tape target-tape]
-            let Noun::Cell(label, target) = payload.as_ref() else { return None };
-            let label_c  = Chunk::annotation(&text_of(label));   // (~, t)
-            let target_c = Chunk::text(&text_of(target));        // (#, t)
-            Chunk::new(sigil::ZAP, render::COMPONENT, encode_nested(&[label_c, target_c]))
+            let Noun::Cell(label, target) = payload.as_ref() else {
+                return None;
+            };
+            let label_c = Chunk::annotation(&text_of(label)); // (~, t)
+            let target_c = Chunk::text(&text_of(target)); // (#, t)
+            Chunk::new(
+                sigil::ZAP,
+                render::COMPONENT,
+                encode_nested(&[label_c, target_c]),
+            )
+        }
+        tag::STAT => {
+            let Noun::Cell(value, caption) = payload.as_ref() else {
+                return None;
+            };
+            let value_c = Chunk::text(&text_of(value));
+            let cap_c = Chunk::annotation(&text_of(caption));
+            Chunk::new(
+                sigil::BUC,
+                render::COMPONENT,
+                encode_nested(&[value_c, cap_c]),
+            )
+        }
+        tag::ROW => {
+            let mut kids = Vec::new();
+            let mut cur = payload.as_ref();
+            while let Noun::Cell(elem, rest) = cur {
+                if let Some(c) = noun_to_chunk(elem) {
+                    kids.push(c);
+                }
+                cur = rest.as_ref();
+            }
+            Chunk::new(sigil::LUS, render::COMPONENT, encode_nested(&kids))
         }
         _ => return None,
     };
@@ -92,6 +125,13 @@ pub fn noun_to_chunks(n: &Noun) -> Vec<Chunk> {
             let mut out = Vec::new();
             let mut cur = tail.as_ref();
             while let Noun::Cell(elem, rest) = cur {
+                if let Noun::Cell(h, _) = elem.as_ref() {
+                    if matches!(h.as_ref(), Noun::Atom(t) if *t == tag::LIST) {
+                        out.extend(noun_to_chunks(elem));
+                        cur = rest.as_ref();
+                        continue;
+                    }
+                }
                 if let Some(c) = noun_to_chunk(elem) {
                     out.push(c);
                 }
@@ -158,9 +198,15 @@ mod tests {
         // Inner: annotation(label) + text(target) — matches prysm action::spawn.
         let inner = tape::decode_nested(&c.payload);
         assert_eq!(inner.len(), 2);
-        assert_eq!((inner[0].sigil, inner[0].render), (sigil::SIG, render::TEXT));
+        assert_eq!(
+            (inner[0].sigil, inner[0].render),
+            (sigil::SIG, render::TEXT)
+        );
         assert_eq!(&inner[0].payload[..], b"ok");
-        assert_eq!((inner[1].sigil, inner[1].render), (sigil::HAX, render::TEXT));
+        assert_eq!(
+            (inner[1].sigil, inner[1].render),
+            (sigil::HAX, render::TEXT)
+        );
         assert_eq!(&inner[1].payload[..], b"@master");
     }
 
@@ -169,15 +215,36 @@ mod tests {
         // [LIST text("a") [error("b") 0]]
         let elems = Noun::cell(
             Noun::cell(Noun::Atom(tag::TEXT), tape("a")),
-            Noun::cell(
-                Noun::cell(Noun::Atom(tag::ERROR), tape("b")),
-                Noun::Atom(0),
-            ),
+            Noun::cell(Noun::cell(Noun::Atom(tag::ERROR), tape("b")), Noun::Atom(0)),
         );
         let n = Noun::cell(Noun::Atom(tag::LIST), elems);
         let chunks = noun_to_chunks(&n);
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].render, render::TEXT);
         assert_eq!(chunks[1].render, render::ERROR);
+    }
+
+    #[test]
+    fn stat_element_is_buc_component() {
+        let n = Noun::cell(
+            Noun::Atom(tag::STAT),
+            Noun::cell(tape("12"), tape("particles")),
+        );
+        let c = noun_to_chunk(&n).unwrap();
+        assert_eq!((c.sigil, c.render), (sigil::BUC, render::COMPONENT));
+        let inner = tape::decode_nested(&c.payload);
+        assert_eq!(inner.len(), 2);
+        assert_eq!(&inner[0].payload[..], b"12");
+        assert_eq!(&inner[1].payload[..], b"particles");
+    }
+
+    #[test]
+    fn nested_list_splices_into_col() {
+        let inner = Noun::cell(Noun::cell(Noun::Atom(tag::TEXT), tape("x")), Noun::Atom(0));
+        let elems = Noun::cell(Noun::cell(Noun::Atom(tag::LIST), inner), Noun::Atom(0));
+        let n = Noun::cell(Noun::Atom(tag::LIST), elems);
+        let chunks = noun_to_chunks(&n);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(&chunks[0].payload[..], b"x");
     }
 }
