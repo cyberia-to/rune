@@ -60,7 +60,7 @@ fn text_of(n: &Noun) -> String {
     String::from_utf8_lossy(&noun_to_bytes(n)).into_owned()
 }
 
-fn tr_cells(payload: &Noun) -> Vec<Chunk> {
+fn row_cells(payload: &Noun) -> Vec<Chunk> {
     let mut cells = Vec::new();
     let mut cur = payload;
     while let Noun::Cell(elem, rest) = cur {
@@ -83,8 +83,8 @@ fn table_rows(payload: &Noun) -> Vec<Chunk> {
                         cur = rest.as_ref();
                         continue;
                     }
-                    if matches!(h.as_ref(), Noun::Atom(t) if *t == tag::TR) {
-                        let cells = tr_cells(tail);
+                    if matches!(h.as_ref(), Noun::Atom(t) if *t == tag::ROW) {
+                        let cells = row_cells(tail);
                         let (sig, rend) = if first {
                             first = false;
                             (sigil::FAS, render::STRUCT)
@@ -157,15 +157,6 @@ pub fn noun_to_chunk(n: &Noun) -> Option<Chunk> {
             render::TABLE,
             encode_nested(&table_rows(payload)),
         ),
-        tag::TR => {
-            let mut cells = Vec::new();
-            let mut cur = payload.as_ref();
-            while let Noun::Cell(elem, rest) = cur {
-                cells.push(Chunk::text(&text_of(elem)));
-                cur = rest.as_ref();
-            }
-            Chunk::new(sigil::COL, render::STRUCT, encode_nested(&cells))
-        }
         _ => return None,
     };
     Some(chunk)
@@ -305,8 +296,11 @@ mod tests {
     }
 
     #[test]
-    fn table_first_tr_is_header() {
-        let header = Noun::cell(Noun::Atom(tag::TR), Noun::cell(tape("name"), Noun::Atom(0)));
+    fn table_first_row_is_header() {
+        let header = Noun::cell(
+            Noun::Atom(tag::ROW),
+            Noun::cell(tape("name"), Noun::Atom(0)),
+        );
         let n = Noun::cell(Noun::Atom(tag::TABLE), Noun::cell(header, Noun::Atom(0)));
         let c = noun_to_chunk(&n).unwrap();
         assert_eq!((c.sigil, c.render), (sigil::HAX, render::TABLE));

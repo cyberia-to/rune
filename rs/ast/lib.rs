@@ -37,10 +37,8 @@ pub mod tag {
     pub const STAT: u64 = 6;
     /// `[7 e1 [e2 … 0]]` — horizontal row of elements → `(+, c)` LUS/COMPONENT
     pub const ROW: u64 = 7;
-    /// `[8 tr0 [tr1 … 0]]` — table of `tr` rows → `(#, T)` HAX/TABLE
+    /// `[8 row0 [row1 … 0]]` — table of `row`s → `(#, T)` HAX/TABLE
     pub const TABLE: u64 = 8;
-    /// `[9 tape0 [tape1 … 0]]` — one table row of cells
-    pub const TR: u64 = 9;
 }
 
 /// Act ABI — the world-touching effects a runtime requests through the ward.

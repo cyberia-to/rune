@@ -463,7 +463,6 @@ fn lower_expression(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
                     "col" => return prysm_col(&args, env),
                     "row" => return prysm_row(&args, env),
                     "table" => return prysm_table(&args, env),
-                    "tr" => return prysm_tr(&args, env),
                     // act builtins — request a world-touch through the host/ward.
                     // `emit(x)` → [16 [act args-f] [0 2]] → perform, return result.
                     "emit" => return act_unary(act::EMIT, &args, env),
@@ -939,7 +938,7 @@ fn prysm_row(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
     Ok(op3(quote(tag::ROW), list_f))
 }
 
-/// `table(tr(...), …)` → `[TABLE tr0 [tr1 … 0]]`.
+/// `table(row(...), …)` → `[TABLE row0 [row1 … 0]]`.
 fn prysm_table(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
     let mut list_f = quote(0);
     for a in args.iter().rev() {
@@ -947,16 +946,6 @@ fn prysm_table(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
         list_f = op3(ef, list_f);
     }
     Ok(op3(quote(tag::TABLE), list_f))
-}
-
-/// `tr(c0, c1, …)` → `[TR tape0 [tape1 … 0]]`.
-fn prysm_tr(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
-    let mut list_f = quote(0);
-    for a in args.iter().rev() {
-        let ef = lower_in(a.clone(), env)?;
-        list_f = op3(ef, list_f);
-    }
-    Ok(op3(quote(tag::TR), list_f))
 }
 
 /// `col(e1, .., en)` → `[LIST e1 [e2 [.. 0]]]` — a null-terminated element list.
