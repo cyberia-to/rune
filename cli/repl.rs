@@ -277,7 +277,7 @@ fn lower_only(src: &str) -> Result<rune_ast::Noun, String> {
 
 /// Parse → lower → eval with a collecting host. Returns (chunks, result noun) or
 /// a human error string. Never panics — the REPL must survive bad input.
-fn eval_program(src: &str) -> Result<(Vec<tape::Chunk>, rune_ast::Noun), String> {
+fn eval_program(src: &str) -> Result<(Vec<tade::Chunk>, rune_ast::Noun), String> {
     let formula = lower_only(src)?;
     let subject = crate::subject();
     let mut host = CollectHost { emitted: Vec::new() };

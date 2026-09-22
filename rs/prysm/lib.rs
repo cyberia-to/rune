@@ -2,7 +2,7 @@
 //!
 //! A rune program that renders UI evaluates to a **chunk-noun** — a noun tree
 //! using the `rune_ast::tag` ABI. This crate decodes that noun into
-//! [`tape::Chunk`]s, the exact wire format prysm's `dispatch` renders (to wgpu
+//! [`tade::Chunk`]s, the exact wire format prysm's `dispatch` renders (to wgpu
 //! cells, ansi, or html). It is the only coupling between rune and prysm: rune
 //! emits nouns, prysm renders chunks, and `noun_to_chunks` is the seam.
 //!
@@ -10,11 +10,11 @@
 //!   rune program ──lower──> Nox formula ──eval──> chunk-noun
 //!                                                     │  noun_to_chunks
 //!                                                     ▼
-//!                                            Vec<tape::Chunk> ──StreamChannel──> prysm::dispatch
+//!                                            Vec<tade::Chunk> ──StreamChannel──> prysm::dispatch
 //! ```
 
 use rune_ast::{Noun, tag};
-use tape::{bytes::Bytes, encode_nested, render, sigil, Chunk};
+use tade::{bytes::Bytes, encode_nested, render, sigil, Chunk};
 
 /// Decode a `tape`/cord payload noun into raw bytes.
 ///
@@ -156,7 +156,7 @@ mod tests {
         let c = noun_to_chunk(&n).unwrap();
         assert_eq!((c.sigil, c.render), (sigil::ZAP, render::COMPONENT));
         // Inner: annotation(label) + text(target) — matches prysm action::spawn.
-        let inner = tape::decode_nested(&c.payload);
+        let inner = tade::decode_nested(&c.payload);
         assert_eq!(inner.len(), 2);
         assert_eq!((inner[0].sigil, inner[0].render), (sigil::SIG, render::TEXT));
         assert_eq!(&inner[0].payload[..], b"ok");

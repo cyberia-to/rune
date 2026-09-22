@@ -1,11 +1,11 @@
 //! ANSI rendering of prysm chunks for the terminal.
 //!
-//! tape carries no terminal renderer — rendering lives in prysm, which targets
+//! tade carries no terminal renderer — rendering lives in prysm, which targets
 //! wgpu/Bevy — so the CLI owns this mapping: `(sigil, render)` → a styled line.
 //! Colour is gated on `color` (set from tty detection) so piped output stays
 //! plain text.
 
-use tape::{decode_nested, read_kv, render, sigil, Chunk};
+use tade::{decode_nested, read_kv, render, sigil, Chunk};
 
 pub const RESET: &str = "\x1b[0m";
 const DIM: &str = "\x1b[2m";

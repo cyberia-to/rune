@@ -17,7 +17,7 @@ impl Noun {
 ///
 /// A prysm element is a noun `[tag payload]` where `tag` is one of these small
 /// atoms. `rune-lower` emits these from `text(..)`/`button(..)`/`col(..)` builtins;
-/// `rune-prysm::noun_to_chunks` decodes them into `tape::Chunk`s, which prysm's
+/// `rune-prysm::noun_to_chunks` decodes them into `tade::Chunk`s, which prysm's
 /// `dispatch` renders. This is the only contract between the two; rune never
 /// touches Bevy.
 pub mod tag {
