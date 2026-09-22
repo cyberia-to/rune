@@ -18,6 +18,6 @@ rune-prysm      = { workspace = true }
 rune-interp     = { workspace = true }
 rune-subject    = { workspace = true }
 rune-mold       = { workspace = true }
-tape            = { workspace = true }
+tade            = { workspace = true }
 reedline        = { workspace = true }
 nu-ansi-term    = { workspace = true }
