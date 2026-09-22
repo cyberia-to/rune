@@ -180,4 +180,66 @@ mod tests {
         assert_eq!(chunks[0].render, render::TEXT);
         assert_eq!(chunks[1].render, render::ERROR);
     }
+
+    #[test]
+    fn anno_element_is_sig_text() {
+        let n = Noun::cell(Noun::Atom(tag::ANNO), tape("label"));
+        let c = noun_to_chunk(&n).unwrap();
+        assert_eq!((c.sigil, c.render), (sigil::SIG, render::TEXT));
+        assert_eq!(&c.payload[..], b"label");
+    }
+
+    #[test]
+    fn log_element_is_dot_log_with_raw_payload_bytes() {
+        // LOG carries noun_to_bytes(payload) verbatim, not a nested
+        // level/source/message encoding — unlike tade::Chunk::log.
+        let n = Noun::cell(Noun::Atom(tag::LOG), tape("boot ok"));
+        let c = noun_to_chunk(&n).unwrap();
+        assert_eq!((c.sigil, c.render), (sigil::DOT, render::LOG));
+        assert_eq!(&c.payload[..], b"boot ok");
+    }
+
+    #[test]
+    fn unknown_tag_yields_none() {
+        // No element in `tag` is assigned this value.
+        let n = Noun::cell(Noun::Atom(99), tape("x"));
+        assert!(noun_to_chunk(&n).is_none());
+    }
+
+    #[test]
+    fn non_cell_noun_yields_none() {
+        // `n` must be `[head payload]`; a bare atom has no head to match on.
+        assert!(noun_to_chunk(&Noun::Atom(7)).is_none());
+    }
+
+    #[test]
+    fn non_atom_head_yields_none() {
+        // The tag position must be an atom, not another cell.
+        let n = Noun::cell(Noun::cell(Noun::Atom(1), Noun::Atom(2)), tape("x"));
+        assert!(noun_to_chunk(&n).is_none());
+    }
+
+    #[test]
+    fn button_with_non_cell_payload_yields_none() {
+        // BUTTON's payload must destructure as [label target]; a bare tape
+        // (itself a cons list, but not a two-element [label target] pair
+        // when read as one) or atom payload must not panic.
+        let n = Noun::cell(Noun::Atom(tag::BUTTON), Noun::Atom(0));
+        assert!(noun_to_chunk(&n).is_none());
+    }
+
+    #[test]
+    fn noun_to_chunks_single_non_list_element_yields_one_chunk() {
+        // A recognised element noun not wrapped in [LIST …] still yields
+        // exactly one chunk, per the doc comment on `noun_to_chunks`.
+        let n = Noun::cell(Noun::Atom(tag::TEXT), tape("solo"));
+        let chunks = noun_to_chunks(&n);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(&chunks[0].payload[..], b"solo");
+    }
+
+    #[test]
+    fn noun_to_chunks_unrecognized_noun_yields_empty() {
+        assert!(noun_to_chunks(&Noun::Atom(42)).is_empty());
+    }
 }
