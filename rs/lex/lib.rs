@@ -67,7 +67,12 @@ impl<'src> Lexer<'src> {
             match self.next_token() {
                 Some(tok) => out.push(Spanned { inner: tok, span: Span { start, end: self.pos } }),
                 None if self.pos >= self.src.len() => break,
-                None => { self.pos += 1; } // skip unknown char
+                // Comment-skipping and the unknown-char arm below already advance
+                // `pos` past whatever they consumed; a second blind `pos += 1` here
+                // double-skips (dropping the char right after a comment) and, for a
+                // multi-byte unknown char, lands mid-character and panics on the
+                // next slice.
+                None => {}
             }
         }
         out.push(Spanned { inner: Token::Eof, span: Span { start: self.pos, end: self.pos } });
@@ -145,7 +150,7 @@ impl<'src> Lexer<'src> {
             '"' => self.lex_str(),
             '0'..='9' => self.lex_number(),
             'a'..='z' | 'A'..='Z' | '_' => self.lex_ident(),
-            _ => return None,
+            _ => { self.advance(); return None; }
         })
     }
 
@@ -213,5 +218,184 @@ impl<'src> Lexer<'src> {
         if let Some(c) = self.src[self.pos..].chars().next() {
             self.pos += c.len_utf8();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn toks(src: &str) -> Vec<Token> {
+        Lexer::new(src).tokenize().into_iter().map(|s| s.inner).collect()
+    }
+
+    #[test]
+    fn eof_always_terminates() {
+        assert_eq!(toks(""), vec![Token::Eof]);
+    }
+
+    #[test]
+    fn sigils() {
+        assert_eq!(
+            toks("#@~/$^!|?:+"),
+            vec![
+                Token::Hash, Token::Pat, Token::Sig, Token::Fas, Token::Buc, Token::Ket,
+                Token::Zap, Token::Bar, Token::Wut, Token::Col, Token::Lus, Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn dot_vs_dotdot() {
+        assert_eq!(toks("."), vec![Token::Dot, Token::Eof]);
+        assert_eq!(toks(".."), vec![Token::DotDot, Token::Eof]);
+    }
+
+    #[test]
+    fn equals_vs_fat_arrow() {
+        assert_eq!(toks("="), vec![Token::Tis, Token::Eof]);
+        assert_eq!(toks("=>"), vec![Token::FatArrow, Token::Eof]);
+    }
+
+    #[test]
+    fn colon_vs_coloncolon() {
+        assert_eq!(toks(":"), vec![Token::Col, Token::Eof]);
+        assert_eq!(toks("::x"), vec![Token::Eof]); // `::` opens a line comment, not ColCol
+    }
+
+    #[test]
+    fn minus_vs_arrow() {
+        assert_eq!(toks("-"), vec![Token::Ident("-".into()), Token::Eof]);
+        assert_eq!(toks("->"), vec![Token::Arrow, Token::Eof]);
+    }
+
+    #[test]
+    fn comparison_operators() {
+        assert_eq!(toks("<"), vec![Token::Ident("<".into()), Token::Eof]);
+        assert_eq!(toks("<="), vec![Token::Ident("<=".into()), Token::Eof]);
+        assert_eq!(toks(">"), vec![Token::Ident(">".into()), Token::Eof]);
+        assert_eq!(toks(">="), vec![Token::Ident(">=".into()), Token::Eof]);
+    }
+
+    #[test]
+    fn punctuation() {
+        assert_eq!(
+            toks("(){}[],;&%*"),
+            vec![
+                Token::LParen, Token::RParen, Token::LBrace, Token::RBrace,
+                Token::LBrack, Token::RBrack, Token::Comma, Token::Semi,
+                Token::Amp, Token::Percent, Token::Star, Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn newline_token() {
+        assert_eq!(toks("\n"), vec![Token::Newline, Token::Eof]);
+    }
+
+    #[test]
+    fn horizontal_whitespace_is_not_tokenized() {
+        assert_eq!(toks("  \t \r "), vec![Token::Eof]);
+    }
+
+    #[test]
+    fn classic_keywords() {
+        for (src, tok) in [
+            ("fn", Token::Fn), ("let", Token::Let), ("if", Token::If),
+            ("else", Token::Else), ("loop", Token::Loop), ("return", Token::Return),
+            ("struct", Token::Struct), ("enum", Token::Enum), ("impl", Token::Impl),
+            ("pub", Token::Pub), ("use", Token::Use), ("async", Token::Async),
+            ("await", Token::Await),
+        ] {
+            assert_eq!(toks(src), vec![tok, Token::Eof], "keyword {src}");
+        }
+    }
+
+    #[test]
+    fn identifiers_with_digits_underscores_and_hyphens() {
+        assert_eq!(toks("my_var2"), vec![Token::Ident("my_var2".into()), Token::Eof]);
+        assert_eq!(toks("kebab-case"), vec![Token::Ident("kebab-case".into()), Token::Eof]);
+        assert_eq!(toks("_leading"), vec![Token::Ident("_leading".into()), Token::Eof]);
+    }
+
+    #[test]
+    fn integer_and_underscored_integer() {
+        assert_eq!(toks("42"), vec![Token::Int(42), Token::Eof]);
+        assert_eq!(toks("1_000"), vec![Token::Int(1000), Token::Eof]);
+    }
+
+    #[test]
+    fn float_requires_digit_after_dot() {
+        assert_eq!(toks("3.14"), vec![Token::Float("3.14".into()), Token::Eof]);
+        // `1.` with no following digit is Int(1) then Dot, not a float
+        assert_eq!(toks("1."), vec![Token::Int(1), Token::Dot, Token::Eof]);
+    }
+
+    #[test]
+    fn basic_string() {
+        assert_eq!(toks("\"hello\""), vec![Token::Str("hello".into()), Token::Eof]);
+    }
+
+    #[test]
+    fn string_with_escaped_quote_is_not_terminated_early() {
+        // the backslash-escape skip means the embedded `\"` does not close the string
+        assert_eq!(toks("\"a\\\"b\""), vec![Token::Str("a\\\"b".into()), Token::Eof]);
+    }
+
+    #[test]
+    fn unterminated_string_reaches_eof_without_panicking() {
+        assert_eq!(toks("\"never closed"), vec![Token::Str("never closed".into()), Token::Eof]);
+    }
+
+    #[test]
+    fn line_comment_is_skipped_and_newline_survives() {
+        // before the fix, the fallback `pos += 1` after a comment silently ate the
+        // newline that follows it, so no Newline token was ever produced here
+        assert_eq!(toks("::a comment\nfn"), vec![Token::Newline, Token::Fn, Token::Eof]);
+    }
+
+    #[test]
+    fn line_comment_at_eof_with_no_trailing_newline() {
+        assert_eq!(toks("::a comment"), vec![Token::Eof]);
+    }
+
+    #[test]
+    fn block_comment_does_not_swallow_the_next_token() {
+        // before the fix, the fallback `pos += 1` after a block comment ate the
+        // first character that followed it: "/* c */fn" tokenized as Ident("n")
+        assert_eq!(toks("/* c */fn"), vec![Token::Fn, Token::Eof]);
+    }
+
+    #[test]
+    fn unterminated_block_comment_reaches_eof_without_panicking() {
+        assert_eq!(toks("/* never closed"), vec![Token::Eof]);
+    }
+
+    #[test]
+    fn unknown_ascii_char_is_skipped() {
+        // backtick is not assigned to any token
+        assert_eq!(toks("`fn"), vec![Token::Fn, Token::Eof]);
+    }
+
+    #[test]
+    fn unknown_multibyte_char_is_skipped_without_panicking() {
+        // before the fix, the fallback `pos += 1` advanced by one byte regardless
+        // of the unknown character's UTF-8 width, landing mid-character on a
+        // multi-byte char and panicking on the next slice
+        assert_eq!(toks("中fn"), vec![Token::Fn, Token::Eof]);
+        assert_eq!(toks("🎉fn"), vec![Token::Fn, Token::Eof]);
+    }
+
+    #[test]
+    fn multibyte_identifier_content_in_string_is_preserved() {
+        assert_eq!(toks("\"héllo 中\""), vec![Token::Str("héllo 中".into()), Token::Eof]);
+    }
+
+    #[test]
+    fn span_covers_the_token_exactly() {
+        let spanned = Lexer::new("  fn").tokenize();
+        assert_eq!(spanned[0].span.start, 2);
+        assert_eq!(spanned[0].span.end, 4);
     }
 }
