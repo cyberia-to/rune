@@ -342,7 +342,13 @@ fn add_field(a: u64, b: u64) -> u64 {
 }
 
 fn sub_field(a: u64, b: u64) -> u64 {
-    ((a as u128 + GOLDILOCKS_PRIME as u128 - b as u128) % GOLDILOCKS_PRIME as u128) as u64
+    // Reduce both operands into canonical range first: a raw u64 atom is not
+    // guaranteed to be < GOLDILOCKS_PRIME, and GOLDILOCKS_PRIME sits only
+    // 2^32-2 below u64::MAX, so an unreduced b > a + PRIME underflows the
+    // u128 subtraction below before the final mod ever runs.
+    let a = (a as u128) % GOLDILOCKS_PRIME as u128;
+    let b = (b as u128) % GOLDILOCKS_PRIME as u128;
+    ((a + GOLDILOCKS_PRIME as u128 - b) % GOLDILOCKS_PRIME as u128) as u64
 }
 
 fn mul_field(a: u64, b: u64) -> u64 {
@@ -567,6 +573,31 @@ mod tests {
         // 0 - 1 = p - 1 mod p
         let formula = c(a(6), c(c(a(1), a(0)), c(a(1), a(1))));
         assert_eq!(eval(&a(0), &formula).unwrap(), a(GOLDILOCKS_PRIME - 1));
+    }
+
+    #[test]
+    fn sub_unreduced_operand_above_prime_does_not_underflow() {
+        // A nox atom is a raw u64, not guaranteed < GOLDILOCKS_PRIME. Before
+        // the fix, sub_field(0, GOLDILOCKS_PRIME + 1) computed
+        // 0 + PRIME - (PRIME + 1) as a u128 subtraction and underflowed
+        // (panics in debug, silently wraps to a wrong field element in
+        // release). GOLDILOCKS_PRIME + 1 is congruent to 1 mod p, so the
+        // correct result is the same as 0 - 1 = p - 1.
+        let b = GOLDILOCKS_PRIME + 1;
+        let formula = c(a(6), c(c(a(1), a(0)), c(a(1), a(b))));
+        assert_eq!(eval(&a(0), &formula).unwrap(), a(GOLDILOCKS_PRIME - 1));
+    }
+
+    #[test]
+    fn sub_unreduced_operand_near_u64_max_does_not_underflow() {
+        // b close to u64::MAX, far past a + PRIME for a small a: the worst
+        // case for the pre-fix u128 subtraction, reduces to a - (b mod p).
+        let a_val = 5u64;
+        let b = u64::MAX;
+        let b_reduced = (b as u128 % GOLDILOCKS_PRIME as u128) as u64;
+        let expected = sub_field(a_val, b_reduced);
+        let formula = c(a(6), c(c(a(1), a(a_val)), c(a(1), a(b))));
+        assert_eq!(eval(&a(0), &formula).unwrap(), a(expected));
     }
 
     // ── pattern 7: mul ────────────────────────────────────────────────────────
