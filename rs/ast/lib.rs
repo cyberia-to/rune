@@ -13,26 +13,32 @@ impl Noun {
     }
 }
 
-/// Chunk-noun ABI — the wire between rune result nouns and prysm/tape chunks.
+/// Chunk-noun ABI — the wire between rune result nouns and prysm/tade chunks.
 ///
 /// A prysm element is a noun `[tag payload]` where `tag` is one of these small
 /// atoms. `rune-lower` emits these from `text(..)`/`button(..)`/`col(..)` builtins;
-/// `rune-prysm::noun_to_chunks` decodes them into `tape::Chunk`s, which prysm's
+/// `rune-prysm::noun_to_chunks` decodes them into `tade::Chunk`s, which prysm's
 /// `dispatch` renders. This is the only contract between the two; rune never
 /// touches Bevy.
 pub mod tag {
     /// `[0 e1 [e2 ... 0]]` — a column/list of elements (null-terminated).
-    pub const LIST:   u64 = 0;
+    pub const LIST: u64 = 0;
     /// `[1 <tape>]` — body text → `(#, t)` HAX/TEXT
-    pub const TEXT:   u64 = 1;
+    pub const TEXT: u64 = 1;
     /// `[2 <tape>]` — annotation → `(~, t)` SIG/TEXT
-    pub const ANNO:   u64 = 2;
+    pub const ANNO: u64 = 2;
     /// `[3 <tape>]` — error → `(!, e)` ZAP/ERROR
-    pub const ERROR:  u64 = 3;
+    pub const ERROR: u64 = 3;
     /// `[4 <tape>]` — log line → `(., l)` DOT/LOG
-    pub const LOG:    u64 = 4;
+    pub const LOG: u64 = 4;
     /// `[5 [<label-tape> <target-tape>]]` — action → `(!, c)` ZAP/COMPONENT
     pub const BUTTON: u64 = 5;
+    /// `[6 [<value-tape> <caption-tape>]]` — census card → `($, c)` BUC/COMPONENT
+    pub const STAT: u64 = 6;
+    /// `[7 e1 [e2 … 0]]` — horizontal row of elements → `(+, c)` LUS/COMPONENT
+    pub const ROW: u64 = 7;
+    /// `[8 row0 [row1 … 0]]` — table of `row`s → `(#, T)` HAX/TABLE
+    pub const TABLE: u64 = 8;
 }
 
 /// Act ABI — the world-touching effects a runtime requests through the ward.
@@ -45,12 +51,12 @@ pub mod act {
     /// Act tags live in a high reserved window, clear of user hint tags
     /// (small ints / string-hash tags won't realistically land here).
     pub const BASE: u64 = 0xAC75_0000_0000_0000;
-    pub const EMIT:      u64 = BASE + 1; // render prysm chunks to a surface
-    pub const QUERY:     u64 = BASE + 2; // read the cybergraph (one-shot)
-    pub const LINK:      u64 = BASE + 3; // write a cyberlink
-    pub const SEAL:      u64 = BASE + 4; // finalize an intent
+    pub const EMIT: u64 = BASE + 1; // render prysm chunks to a surface
+    pub const QUERY: u64 = BASE + 2; // read the cybergraph (one-shot)
+    pub const LINK: u64 = BASE + 3; // write a cyberlink
+    pub const SEAL: u64 = BASE + 4; // finalize an intent
     pub const SUBSCRIBE: u64 = BASE + 5; // stream graph events
-    pub const HOST:      u64 = BASE + 6; // invoke another runtime
+    pub const HOST: u64 = BASE + 6; // invoke another runtime
 
     /// The subject slot holding the requester's capabilities.
     pub const CAPS_AXIS: u64 = 30;
@@ -76,19 +82,35 @@ pub enum Expr {
     /// Gate definition: sample type + body
     Gate { sample: Box<Expr>, body: Box<Expr> },
     /// Let binding: name, value, continuation
-    Let { name: String, mold: Option<Box<Expr>>, value: Box<Expr>, body: Box<Expr> },
+    Let {
+        name: String,
+        mold: Option<Box<Expr>>,
+        value: Box<Expr>,
+        body: Box<Expr>,
+    },
     /// Function call
     Call { gate: Box<Expr>, args: Vec<Expr> },
     /// Conditional
-    If { cond: Box<Expr>, yes: Box<Expr>, no: Box<Expr> },
+    If {
+        cond: Box<Expr>,
+        yes: Box<Expr>,
+        no: Box<Expr>,
+    },
     /// Pattern match (switch)
-    Match { subject: Box<Expr>, arms: Vec<(Expr, Expr)> },
+    Match {
+        subject: Box<Expr>,
+        arms: Vec<(Expr, Expr)>,
+    },
     /// Trap: loop with `$` as recur point
     Trap(Box<Expr>),
     /// Recur to enclosing trap
     Loop,
     /// Rebind a subject slot and continue
-    Rebind { slot: String, value: Box<Expr>, body: Box<Expr> },
+    Rebind {
+        slot: String,
+        value: Box<Expr>,
+        body: Box<Expr>,
+    },
     /// Compose: evaluate right against left
     Compose(Box<Expr>, Box<Expr>),
     /// Cast to mold
@@ -104,11 +126,18 @@ pub enum Expr {
     /// Field multiplication (Nox pattern 7)
     Mul(Box<Expr>, Box<Expr>),
     /// Evaluate formula against subject (Nox pattern 2 / `.*`)
-    Eval { subject: Box<Expr>, formula: Box<Expr> },
+    Eval {
+        subject: Box<Expr>,
+        formula: Box<Expr>,
+    },
     /// Scry — read from the cybergraph (`.^`)
     Scry { mold: Box<Expr>, path: Box<Expr> },
     /// Hint: event-reactive yield
-    Hint { tag: String, selector: Box<Expr>, body: Box<Expr> },
+    Hint {
+        tag: String,
+        selector: Box<Expr>,
+        body: Box<Expr>,
+    },
     /// Host call: escape to WASM / wGPU / glia
     Host { target: String, args: Box<Expr> },
     /// Arm definition (within a door/core)
@@ -116,7 +145,11 @@ pub enum Expr {
     /// Door: multi-arm core
     Door(Vec<Expr>),
     /// Method call on a door: obj.method(args)
-    MethodCall { obj: String, method: String, args: Vec<Expr> },
+    MethodCall {
+        obj: String,
+        method: String,
+        args: Vec<Expr>,
+    },
     /// A cybermark address embedded in expression context
     Address(Address),
 }

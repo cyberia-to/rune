@@ -41,7 +41,7 @@ fn cmd_run(args: &[String]) {
 /// `rune eval <expr>` — evaluate a single expression.
 ///
 /// Host-aware, so it doubles as the rune↔prysm demo surface. `emit` and the
-/// other acts fire as the program runs and are shown as the tape chunks prysm
+/// other acts fire as the program runs and are shown as the tade chunks prysm
 /// would render (the same chunks feed `dispatch` over wgpu/ansi/html). A
 /// program whose value is itself a renderable noun — `text("hi")`, `col(...)` —
 /// is decoded the same way. Anything else (arithmetic, plain cells) prints as a

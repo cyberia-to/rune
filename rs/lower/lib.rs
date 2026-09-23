@@ -24,7 +24,7 @@
 /// Subject slot axes (right-nested cons list):
 ///   ~self  = 2   ~now   = 6    ~here  = 14   ~caps  = 30
 ///   ~code  = 62  ~libs  = 126  ~mem   = 254  ~world = 255
-use rune_ast::{Address, Expr, Noun, act, tag};
+use rune_ast::{act, tag, Address, Expr, Noun};
 use rune_subject::{axis as slot, path_atom};
 
 #[derive(Debug)]
@@ -35,6 +35,15 @@ pub struct LowerError {
 /// Lowers a rune Expr to a cyber Nox formula noun.
 pub fn lower(expr: Expr) -> Result<Noun, LowerError> {
     lower_in(expr, &Env::default())
+}
+
+/// Limit expansion work, including repeated gate and door inlining.
+pub fn lower_bounded(expr: Expr, expansions: usize) -> Result<Noun, LowerError> {
+    let env = Env {
+        budget: Some(std::rc::Rc::new(std::cell::Cell::new(expansions))),
+        ..Env::default()
+    };
+    lower_in(expr, &env)
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +89,8 @@ struct Env {
     doors: Vec<DoorDef>,
     /// True when compiling inside a Trap body (enables Loop/recur).
     in_trap: bool,
+    recursion: usize,
+    budget: Option<std::rc::Rc<std::cell::Cell<usize>>>,
 }
 
 impl Env {
@@ -94,14 +105,21 @@ impl Env {
     /// Push `name` as a stack binding AND record a gate definition for inlining.
     fn push_gate(&self, name: &str, params: Vec<String>, body_expr: Expr) -> Self {
         let mut e = self.push(name);
-        e.gates.push(GateDef { name: name.to_string(), params, body_expr });
+        e.gates.push(GateDef {
+            name: name.to_string(),
+            params,
+            body_expr,
+        });
         e
     }
 
     /// Push `name` as a stack binding AND record a door definition for method-call inlining.
     fn push_door(&self, name: &str, arms: Vec<ArmDef>) -> Self {
         let mut e = self.push(name);
-        e.doors.push(DoorDef { door_name: name.to_string(), arms });
+        e.doors.push(DoorDef {
+            door_name: name.to_string(),
+            arms,
+        });
         e
     }
 
@@ -112,10 +130,7 @@ impl Env {
 
     /// Look up `name`; returns Some(axis) where axis = stack_axis(index).
     fn lookup(&self, name: &str) -> Option<u64> {
-        self.stack
-            .iter()
-            .position(|n| n == name)
-            .map(stack_axis)
+        self.stack.iter().position(|n| n == name).map(stack_axis)
     }
 
     /// Find a gate definition by name (last one wins).
@@ -143,13 +158,11 @@ fn stack_axis(i: usize) -> u64 {
 fn extract_params(sample: &Expr) -> Vec<String> {
     match sample {
         Expr::Atom(0) => vec![],
-        Expr::Sym(s) if s.starts_with("param:") => {
-            s["param:".len()..]
-                .split(';')
-                .filter(|p| !p.is_empty())
-                .map(|p| p.to_string())
-                .collect()
-        }
+        Expr::Sym(s) if s.starts_with("param:") => s["param:".len()..]
+            .split(';')
+            .filter(|p| !p.is_empty())
+            .map(|p| p.to_string())
+            .collect(),
         Expr::Sym(s) => vec![s.clone()],
         _ => vec![],
     }
@@ -160,6 +173,23 @@ fn extract_params(sample: &Expr) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
+    if let Some(budget) = &env.budget {
+        budget.set(
+            budget
+                .get()
+                .checked_sub(1)
+                .ok_or_else(|| lower_err("lowering expansion budget exhausted"))?,
+        );
+    }
+    if env.stack.len() > 54 || env.recursion >= 128 {
+        return Err(lower_err("lowering nesting limit"));
+    }
+    let mut nested = env.clone();
+    nested.recursion += 1;
+    lower_expression(expr, &nested)
+}
+
+fn lower_expression(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
     match expr {
         // ------------------------------------------------------------------
         // Atom literal → [1 n]  (quote)
@@ -174,7 +204,7 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         // ------------------------------------------------------------------
         Expr::Sym(name) => {
             if let Some(ax) = slot_axis(&name) {
-                Ok(axis(ax))
+                subject_axis(ax, env)
             } else if let Some(ax) = env.lookup(&name) {
                 Ok(axis(ax))
             } else {
@@ -199,7 +229,9 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         // body expr in the env for call-site inlining (so closures resolve
         // captured variables against the correct call-site subject).
         // ------------------------------------------------------------------
-        Expr::Let { name, value, body, .. } => {
+        Expr::Let {
+            name, value, body, ..
+        } => {
             let is_gate = matches!(*value, Expr::Gate { .. });
             let is_door = matches!(*value, Expr::Door(_));
 
@@ -230,12 +262,22 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
                 };
                 let mut arm_defs = Vec::new();
                 for arm_expr in &door_arms {
-                    if let Expr::Arm { name: arm_name, body: arm_body } = arm_expr {
+                    if let Expr::Arm {
+                        name: arm_name,
+                        body: arm_body,
+                    } = arm_expr
+                    {
                         let (params, body_expr) = match arm_body.as_ref() {
-                            Expr::Gate { sample, body: gb } => (extract_params(sample), *gb.clone()),
+                            Expr::Gate { sample, body: gb } => {
+                                (extract_params(sample), *gb.clone())
+                            }
                             other => (vec![], other.clone()),
                         };
-                        arm_defs.push(ArmDef { name: arm_name.clone(), params, body_expr });
+                        arm_defs.push(ArmDef {
+                            name: arm_name.clone(),
+                            params,
+                            body_expr,
+                        });
                     }
                 }
                 // Lower the door formula (battery + payload)
@@ -311,7 +353,11 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         // ------------------------------------------------------------------
         // Hint → [16 [tag-atom selector-f] body-f]
         // ------------------------------------------------------------------
-        Expr::Hint { tag, selector, body } => {
+        Expr::Hint {
+            tag,
+            selector,
+            body,
+        } => {
             let tag_atom = Noun::Atom(path_atom(&tag));
             let sf = lower_in(*selector, env)?;
             let bf = lower_in(*body, env)?;
@@ -340,21 +386,21 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
             // not a graph scry.
             if let Address::Name(n) = &addr {
                 if let Some(ax) = slot_axis(n) {
-                    return Ok(axis(ax));
+                    return subject_axis(ax, env);
                 }
             }
             let path = match addr {
                 Address::Particle(p) => p,
-                Address::Neuron(n)   => format!("@{n}"),
-                Address::Name(n)     => format!("~{n}"),
-                Address::Path(ps)    => ps.join("/"),
-                Address::Token(t)    => format!("${t}"),
+                Address::Neuron(n) => format!("@{n}"),
+                Address::Name(n) => format!("~{n}"),
+                Address::Path(ps) => ps.join("/"),
+                Address::Token(t) => format!("${t}"),
                 Address::Abstract(a) => format!("^{a}"),
-                Address::Home        => "~/".into(),
+                Address::Home => "~/".into(),
             };
             Ok(Noun::cell(
                 Noun::Atom(17),
-                Noun::cell(quote(path_atom(&path)), axis(slot::WORLD)),
+                Noun::cell(quote(path_atom(&path)), subject_axis(slot::WORLD, env)?),
             ))
         }
 
@@ -377,16 +423,16 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
             if let Expr::Sym(ref name) = *gate {
                 let name_str = name.clone();
                 match name_str.as_str() {
-                    "add"  => return binary_op(5,  &args, env),
-                    "sub"  => return binary_op(6,  &args, env),
-                    "mul"  => return binary_op(7,  &args, env),
-                    "inv"  => return unary_op(8,   &args, env),
-                    "lt"   => return binary_op(10, &args, env),
-                    "xor"  => return binary_op(11, &args, env),
-                    "and"  => return binary_op(12, &args, env),
-                    "not"  => return unary_op(13,  &args, env),
-                    "shl"  => return binary_op(14, &args, env),
-                    "hash" => return unary_op(15,  &args, env),
+                    "add" => return binary_op(5, &args, env),
+                    "sub" => return binary_op(6, &args, env),
+                    "mul" => return binary_op(7, &args, env),
+                    "inv" => return unary_op(8, &args, env),
+                    "lt" => return binary_op(10, &args, env),
+                    "xor" => return binary_op(11, &args, env),
+                    "and" => return binary_op(12, &args, env),
+                    "not" => return unary_op(13, &args, env),
+                    "shl" => return binary_op(14, &args, env),
+                    "hash" => return unary_op(15, &args, env),
                     // neg(x) → [6 [1 0] x-f]  (0 - x)
                     "neg" => {
                         if args.len() != 1 {
@@ -408,19 +454,23 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
                     }
                     // prysm element constructors — lower to chunk-noun `[tag …]`.
                     // Each evaluates to a value the prysm bridge decodes to a Chunk.
-                    "text"   => return prysm_unary(tag::TEXT,  &args, env),
-                    "anno"   => return prysm_unary(tag::ANNO,  &args, env),
-                    "error"  => return prysm_unary(tag::ERROR, &args, env),
-                    "log"    => return prysm_unary(tag::LOG,   &args, env),
+                    "text" => return prysm_unary(tag::TEXT, &args, env),
+                    "anno" => return prysm_unary(tag::ANNO, &args, env),
+                    "error" => return prysm_unary(tag::ERROR, &args, env),
+                    "log" => return prysm_unary(tag::LOG, &args, env),
                     "button" => return prysm_button(&args, env),
-                    "col"    => return prysm_col(&args, env),
+                    "stat" => return prysm_stat(&args, env),
+                    "col" => return prysm_col(&args, env),
+                    "row" => return prysm_row(&args, env),
+                    "table" => return prysm_table(&args, env),
                     // act builtins — request a world-touch through the host/ward.
                     // `emit(x)` → [16 [act args-f] [0 2]] → perform, return result.
-                    "emit"      => return act_unary(act::EMIT,      &args, env),
-                    "query"     => return act_unary(act::QUERY,     &args, env),
-                    "link"      => return act_unary(act::LINK,      &args, env),
-                    "seal"      => return act_unary(act::SEAL,      &args, env),
+                    "emit" => return act_unary(act::EMIT, &args, env),
+                    "query" => return act_unary(act::QUERY, &args, env),
+                    "link" => return act_unary(act::LINK, &args, env),
+                    "seal" => return act_unary(act::SEAL, &args, env),
                     "subscribe" => return act_unary(act::SUBSCRIBE, &args, env),
+                    "host" => return act_unary(act::HOST, &args, env),
                     _ => {}
                 }
 
@@ -431,7 +481,9 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
                     if args.len() != gdef.params.len() {
                         return Err(lower_err(format!(
                             "gate '{}' takes {} args, got {}",
-                            name_str, gdef.params.len(), args.len()
+                            name_str,
+                            gdef.params.len(),
+                            args.len()
                         )));
                     }
 
@@ -491,7 +543,10 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         //           → body_f lives at axis 2 of the new subject; Loop uses [0 2].
         // ------------------------------------------------------------------
         Expr::Trap(body) => {
-            let trap_env = Env { in_trap: true, ..env.push("$") };
+            let trap_env = Env {
+                in_trap: true,
+                ..env.push("$")
+            };
             let body_f = lower_in(*body, &trap_env)?;
             // [3 [1 body_f] [0 1]]  — new_subj formula: cons body_f onto current subject
             let setup = op3(Noun::cell(Noun::Atom(1), body_f.clone()), axis(1));
@@ -518,7 +573,8 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         // ------------------------------------------------------------------
         Expr::Loop => {
             if env.in_trap {
-                let body_f_axis = env.lookup("$")
+                let body_f_axis = env
+                    .lookup("$")
                     .ok_or_else(|| lower_err("internal: '$' missing from trap env"))?;
                 let trap_subj_axis = body_f_axis / 2;
                 Ok(op2(axis(trap_subj_axis), axis(body_f_axis)))
@@ -554,15 +610,10 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
                 let pf = lower_in(pat, &inner_env)?;
                 let bf = lower_in(arm_body, &inner_env)?;
                 // eq test: [9 subject_access pf]  →  0 if equal
-                let test = Noun::cell(
-                    Noun::Atom(9),
-                    Noun::cell(subject_access.clone(), pf),
-                );
+                let test = Noun::cell(Noun::Atom(9), Noun::cell(subject_access.clone(), pf));
                 // branch: if eq=0 (equal), take bf, else continue with chain
-                chain_noun = Noun::cell(
-                    Noun::Atom(4),
-                    Noun::cell(test, Noun::cell(bf, chain_noun)),
-                );
+                chain_noun =
+                    Noun::cell(Noun::Atom(4), Noun::cell(test, Noun::cell(bf, chain_noun)));
             }
 
             // Wrap: cons subject onto current subject to extend, then eval chain
@@ -605,9 +656,7 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         // ------------------------------------------------------------------
         // Arm — standalone (should normally appear only inside Door).
         // ------------------------------------------------------------------
-        Expr::Arm { name: _, body } => {
-            lower_in(*body, env)
-        }
+        Expr::Arm { name: _, body } => lower_in(*body, env),
 
         // ------------------------------------------------------------------
         // Rebind { slot, value, body } — update a let-bound slot in-place.
@@ -624,7 +673,10 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         // depth 2 (axis 14): new_subj_f = [3 [0 2] [3 [0 6] [3 value_f [0 15]]]]
         // ------------------------------------------------------------------
         Expr::Rebind { slot, value, body } => {
-            let depth = env.stack.iter().position(|n| n == &slot)
+            let depth = env
+                .stack
+                .iter()
+                .position(|n| n == &slot)
                 .ok_or_else(|| lower_err(format!("rebind: unbound name '{slot}'")))?;
             let value_f = lower_in(*value, env)?;
             let new_subj_f = rebind_subj_formula(depth, value_f)?;
@@ -645,14 +697,21 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
             // Find the door definition to get the arm body for inlining.
             // Clone everything needed before any mutable borrow of env.
             let (arm_params, arm_body) = {
-                let door_def = env.find_door(&obj)
+                let door_def = env
+                    .find_door(&obj)
                     .ok_or_else(|| lower_err(format!("no door named '{obj}'")))?;
-                let arm = door_def.arms.iter().find(|a| a.name == method)
+                let arm = door_def
+                    .arms
+                    .iter()
+                    .find(|a| a.name == method)
                     .ok_or_else(|| lower_err(format!("door '{obj}' has no arm '{method}'")))?;
                 if args.len() != arm.params.len() {
                     return Err(lower_err(format!(
                         "arm '{}.{}' takes {} args, got {}",
-                        obj, method, arm.params.len(), args.len()
+                        obj,
+                        method,
+                        arm.params.len(),
+                        args.len()
                     )));
                 }
                 (arm.params.clone(), arm.body_expr.clone())
@@ -678,7 +737,9 @@ fn lower_in(expr: Expr, env: &Env) -> Result<Noun, LowerError> {
         // ------------------------------------------------------------------
         // Everything else
         // ------------------------------------------------------------------
-        _ => Err(lower_err(format!("lowering not yet implemented for: {expr:?}"))),
+        _ => Err(lower_err(format!(
+            "lowering not yet implemented for: {expr:?}"
+        ))),
     }
 }
 
@@ -695,16 +756,27 @@ fn axis(n: u64) -> Noun {
 /// (`~self` and `self` both → axis 2). `None` if not a reserved slot.
 fn slot_axis(name: &str) -> Option<u64> {
     Some(match name.trim_start_matches('~') {
-        "self"  => slot::SELF,
-        "now"   => slot::NOW,
-        "here"  => slot::HERE,
-        "caps"  => slot::CAPS,
-        "code"  => slot::CODE,
-        "libs"  => slot::LIBS,
-        "mem"   => slot::MEM,
+        "self" => slot::SELF,
+        "now" => slot::NOW,
+        "here" => slot::HERE,
+        "caps" => slot::CAPS,
+        "code" => slot::CODE,
+        "libs" => slot::LIBS,
+        "mem" => slot::MEM,
         "world" => slot::WORLD,
         _ => return None,
     })
+}
+
+/// Prepend one tail traversal for every lexical subject extension.
+fn subject_axis(slot: u64, env: &Env) -> Result<Noun, LowerError> {
+    let depth = 63 - slot.leading_zeros();
+    let prefix_bits = env.stack.len() as u32 + 1;
+    if prefix_bits + depth > 64 {
+        return Err(lower_err("subject axis overflow"));
+    }
+    let prefix = (1u64 << prefix_bits) - 1;
+    Ok(axis((prefix << depth) | (slot ^ (1u64 << depth))))
 }
 
 /// `[1 n]` — literal atom n
@@ -725,7 +797,10 @@ fn op3(f: Noun, g: Noun) -> Noun {
 /// Emit a binary opcode: `[op arg0-f arg1-f]`
 fn binary_op(op: u64, args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
     if args.len() != 2 {
-        return Err(lower_err(format!("op {op} requires 2 arguments, got {}", args.len())));
+        return Err(lower_err(format!(
+            "op {op} requires 2 arguments, got {}",
+            args.len()
+        )));
     }
     let mut it = args.iter();
     let af = lower_in(it.next().unwrap().clone(), env)?;
@@ -736,7 +811,10 @@ fn binary_op(op: u64, args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
 /// Emit a unary opcode: `[op arg0-f]`
 fn unary_op(op: u64, args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
     if args.len() != 1 {
-        return Err(lower_err(format!("op {op} requires 1 argument, got {}", args.len())));
+        return Err(lower_err(format!(
+            "op {op} requires 1 argument, got {}",
+            args.len()
+        )));
     }
     let xf = lower_in(args[0].clone(), env)?;
     Ok(Noun::cell(Noun::Atom(op), xf))
@@ -770,7 +848,9 @@ fn rebind_subj_formula(depth: usize, value_f: Noun) -> Result<Noun, LowerError> 
 }
 
 fn lower_err(msg: impl Into<String>) -> LowerError {
-    LowerError { message: msg.into() }
+    LowerError {
+        message: msg.into(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -792,7 +872,10 @@ fn tape_noun(s: &str) -> Noun {
 /// A one-payload prysm element: `[3 [1 tag] payload-f]` → `[tag <payload>]`.
 fn prysm_unary(t: u64, args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
     if args.len() != 1 {
-        return Err(lower_err(format!("prysm tag {t} requires 1 argument, got {}", args.len())));
+        return Err(lower_err(format!(
+            "prysm tag {t} requires 1 argument, got {}",
+            args.len()
+        )));
     }
     let body = lower_in(args[0].clone(), env)?;
     Ok(op3(quote(t), body))
@@ -801,9 +884,12 @@ fn prysm_unary(t: u64, args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
 /// `button(label, target)` → `[BUTTON [label target]]`.
 fn prysm_button(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
     if args.len() != 2 {
-        return Err(lower_err(format!("button requires 2 arguments, got {}", args.len())));
+        return Err(lower_err(format!(
+            "button requires 2 arguments, got {}",
+            args.len()
+        )));
     }
-    let label  = lower_in(args[0].clone(), env)?;
+    let label = lower_in(args[0].clone(), env)?;
     let target = lower_in(args[1].clone(), env)?;
     Ok(op3(quote(tag::BUTTON), op3(label, target)))
 }
@@ -813,20 +899,53 @@ fn prysm_button(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
 fn act_formula(act_tag: u64, args_f: Noun) -> Noun {
     Noun::cell(
         Noun::Atom(16),
-        Noun::cell(
-            Noun::cell(Noun::Atom(act_tag), args_f),
-            axis(2),
-        ),
+        Noun::cell(Noun::cell(Noun::Atom(act_tag), args_f), axis(2)),
     )
 }
 
 /// A one-argument act builtin: `emit(x)`, `query(x)`, `link(x)`, …
 fn act_unary(act_tag: u64, args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
     if args.len() != 1 {
-        return Err(lower_err(format!("act {act_tag:#x} requires 1 argument, got {}", args.len())));
+        return Err(lower_err(format!(
+            "act {act_tag:#x} requires 1 argument, got {}",
+            args.len()
+        )));
     }
     let args_f = lower_in(args[0].clone(), env)?;
     Ok(act_formula(act_tag, args_f))
+}
+
+/// `stat(value, caption)` → `[STAT [value caption]]`.
+fn prysm_stat(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
+    if args.len() != 2 {
+        return Err(lower_err(format!(
+            "stat requires 2 arguments, got {}",
+            args.len()
+        )));
+    }
+    let value = lower_in(args[0].clone(), env)?;
+    let caption = lower_in(args[1].clone(), env)?;
+    Ok(op3(quote(tag::STAT), op3(value, caption)))
+}
+
+/// `row(e1, .., en)` → `[ROW e1 [e2 [.. 0]]]`.
+fn prysm_row(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
+    let mut list_f = quote(0);
+    for a in args.iter().rev() {
+        let ef = lower_in(a.clone(), env)?;
+        list_f = op3(ef, list_f);
+    }
+    Ok(op3(quote(tag::ROW), list_f))
+}
+
+/// `table(row(...), …)` → `[TABLE row0 [row1 … 0]]`.
+fn prysm_table(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
+    let mut list_f = quote(0);
+    for a in args.iter().rev() {
+        let ef = lower_in(a.clone(), env)?;
+        list_f = op3(ef, list_f);
+    }
+    Ok(op3(quote(tag::TABLE), list_f))
 }
 
 /// `col(e1, .., en)` → `[LIST e1 [e2 [.. 0]]]` — a null-terminated element list.
@@ -846,10 +965,18 @@ fn prysm_col(args: &[Expr], env: &Env) -> Result<Noun, LowerError> {
 mod tests {
     use super::*;
 
-    fn sym(s: &str) -> Expr { Expr::Sym(s.to_string()) }
-    fn atom_expr(n: u64) -> Expr { Expr::Atom(n) }
-    fn atom_noun(n: u64) -> Noun { Noun::Atom(n) }
-    fn cell_noun(h: Noun, t: Noun) -> Noun { Noun::cell(h, t) }
+    fn sym(s: &str) -> Expr {
+        Expr::Sym(s.to_string())
+    }
+    fn atom_expr(n: u64) -> Expr {
+        Expr::Atom(n)
+    }
+    fn atom_noun(n: u64) -> Noun {
+        Noun::Atom(n)
+    }
+    fn cell_noun(h: Noun, t: Noun) -> Noun {
+        Noun::cell(h, t)
+    }
 
     #[test]
     fn lower_literal() {
@@ -860,23 +987,44 @@ mod tests {
 
     #[test]
     fn lower_subject_slots() {
-        assert_eq!(lower(sym("~self")).unwrap(),  cell_noun(atom_noun(0), atom_noun(2)));
-        assert_eq!(lower(sym("~now")).unwrap(),   cell_noun(atom_noun(0), atom_noun(6)));
-        assert_eq!(lower(sym("~here")).unwrap(),  cell_noun(atom_noun(0), atom_noun(14)));
-        assert_eq!(lower(sym("~caps")).unwrap(),  cell_noun(atom_noun(0), atom_noun(30)));
-        assert_eq!(lower(sym("~code")).unwrap(),  cell_noun(atom_noun(0), atom_noun(62)));
-        assert_eq!(lower(sym("~libs")).unwrap(),  cell_noun(atom_noun(0), atom_noun(126)));
-        assert_eq!(lower(sym("~mem")).unwrap(),   cell_noun(atom_noun(0), atom_noun(254)));
-        assert_eq!(lower(sym("~world")).unwrap(), cell_noun(atom_noun(0), atom_noun(255)));
+        assert_eq!(
+            lower(sym("~self")).unwrap(),
+            cell_noun(atom_noun(0), atom_noun(2))
+        );
+        assert_eq!(
+            lower(sym("~now")).unwrap(),
+            cell_noun(atom_noun(0), atom_noun(6))
+        );
+        assert_eq!(
+            lower(sym("~here")).unwrap(),
+            cell_noun(atom_noun(0), atom_noun(14))
+        );
+        assert_eq!(
+            lower(sym("~caps")).unwrap(),
+            cell_noun(atom_noun(0), atom_noun(30))
+        );
+        assert_eq!(
+            lower(sym("~code")).unwrap(),
+            cell_noun(atom_noun(0), atom_noun(62))
+        );
+        assert_eq!(
+            lower(sym("~libs")).unwrap(),
+            cell_noun(atom_noun(0), atom_noun(126))
+        );
+        assert_eq!(
+            lower(sym("~mem")).unwrap(),
+            cell_noun(atom_noun(0), atom_noun(254))
+        );
+        assert_eq!(
+            lower(sym("~world")).unwrap(),
+            cell_noun(atom_noun(0), atom_noun(255))
+        );
     }
 
     #[test]
     fn lower_eq() {
         // Eq(Atom(1), Atom(2)) → [9 [1 1] [1 2]]
-        let f = lower(Expr::Eq(
-            Box::new(atom_expr(1)),
-            Box::new(atom_expr(2)),
-        )).unwrap();
+        let f = lower(Expr::Eq(Box::new(atom_expr(1)), Box::new(atom_expr(2)))).unwrap();
         assert_eq!(
             f,
             cell_noun(
@@ -940,7 +1088,8 @@ mod tests {
         let f = lower(Expr::Call {
             gate: Box::new(sym("add")),
             args: vec![atom_expr(3), atom_expr(4)],
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(
             f,
             cell_noun(
@@ -959,7 +1108,8 @@ mod tests {
         let f = lower(Expr::Call {
             gate: Box::new(sym("neg")),
             args: vec![atom_expr(7)],
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(
             f,
             cell_noun(
@@ -977,9 +1127,10 @@ mod tests {
         // If { cond: Atom(0), yes: Atom(1), no: Atom(2) } → [4 [1 0] [1 1] [1 2]]
         let f = lower(Expr::If {
             cond: Box::new(atom_expr(0)),
-            yes:  Box::new(atom_expr(1)),
-            no:   Box::new(atom_expr(2)),
-        }).unwrap();
+            yes: Box::new(atom_expr(1)),
+            no: Box::new(atom_expr(2)),
+        })
+        .unwrap();
         assert_eq!(
             f,
             cell_noun(
