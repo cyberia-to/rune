@@ -121,6 +121,67 @@ pub enum Expr {
     Address(Address),
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn noun_cell_wraps_head_and_tail() {
+        let n = Noun::cell(Noun::Atom(1), Noun::Atom(2));
+        assert_eq!(n, Noun::Cell(Box::new(Noun::Atom(1)), Box::new(Noun::Atom(2))));
+    }
+
+    #[test]
+    fn noun_cell_nests_correctly() {
+        let inner = Noun::cell(Noun::Atom(2), Noun::Atom(3));
+        let outer = Noun::cell(Noun::Atom(1), inner.clone());
+        match outer {
+            Noun::Cell(head, tail) => {
+                assert_eq!(*head, Noun::Atom(1));
+                assert_eq!(*tail, inner);
+            }
+            Noun::Atom(_) => panic!("expected Cell"),
+        }
+    }
+
+    #[test]
+    fn is_act_true_at_base() {
+        assert!(act::is_act(act::BASE));
+    }
+
+    #[test]
+    fn is_act_true_at_upper_bound() {
+        assert!(act::is_act(act::BASE + 0xFF));
+    }
+
+    #[test]
+    fn is_act_true_for_named_tags() {
+        assert!(act::is_act(act::EMIT));
+        assert!(act::is_act(act::QUERY));
+        assert!(act::is_act(act::LINK));
+        assert!(act::is_act(act::SEAL));
+        assert!(act::is_act(act::SUBSCRIBE));
+        assert!(act::is_act(act::HOST));
+    }
+
+    #[test]
+    fn is_act_false_just_below_base() {
+        assert!(!act::is_act(act::BASE - 1));
+    }
+
+    #[test]
+    fn is_act_false_just_above_upper_bound() {
+        assert!(!act::is_act(act::BASE + 0x100));
+    }
+
+    #[test]
+    fn is_act_false_for_ordinary_hint_tags() {
+        assert!(!act::is_act(0));
+        assert!(!act::is_act(tag::BUTTON));
+        assert!(!act::is_act(u64::MAX));
+    }
+}
+
 /// A cybermark address — any sigil form resolves to a subject slot or graph lookup.
 #[derive(Debug, Clone)]
 pub enum Address {
