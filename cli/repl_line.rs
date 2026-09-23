@@ -182,13 +182,29 @@ pub struct RuneValidator;
 impl Validator for RuneValidator {
     fn validate(&self, line: &str) -> ValidationResult {
         // Continue onto another line while brackets or a string are still open.
+        // A backslash inside a string escapes the next character, same as
+        // rune-lex's `lex_str` (`if self.peek() == Some('\\') { self.advance(); }`),
+        // so an escaped quote `\"` must not close the string here either —
+        // otherwise a complete one-line string like `"a\"b"` looks like it
+        // still has an open quote and the REPL waits forever for more input.
         let mut depth = 0i32;
         let mut in_str = false;
+        let mut escaped = false;
         for c in line.chars() {
+            if in_str {
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == '"' {
+                    in_str = false;
+                }
+                continue;
+            }
             match c {
-                '"' => in_str = !in_str,
-                '(' | '[' if !in_str => depth += 1,
-                ')' | ']' if !in_str => depth -= 1,
+                '"' => in_str = true,
+                '(' | '[' => depth += 1,
+                ')' | ']' => depth -= 1,
                 _ => {}
             }
         }
@@ -197,5 +213,63 @@ impl Validator for RuneValidator {
         } else {
             ValidationResult::Complete
         }
+    }
+}
+
+#[cfg(test)]
+mod validator_tests {
+    use super::*;
+
+    fn is_complete(line: &str) -> bool {
+        matches!(RuneValidator.validate(line), ValidationResult::Complete)
+    }
+
+    #[test]
+    fn plain_expression_is_complete() {
+        assert!(is_complete("1 + 2"));
+    }
+
+    #[test]
+    fn open_paren_is_incomplete() {
+        assert!(!is_complete("(add 1 2"));
+    }
+
+    #[test]
+    fn balanced_brackets_are_complete() {
+        assert!(is_complete("[1 (add 2 3)]"));
+    }
+
+    #[test]
+    fn open_string_is_incomplete() {
+        assert!(!is_complete("\"hello"));
+    }
+
+    #[test]
+    fn closed_string_is_complete() {
+        assert!(is_complete("\"hello\""));
+    }
+
+    #[test]
+    fn escaped_quote_does_not_close_the_string() {
+        // "a\"b" is one fully-closed string token in rune-lex (the backslash
+        // escapes the quote). Before the fix, the validator counted the
+        // escaped quote as a real toggle and reported this as Incomplete.
+        assert!(is_complete("\"a\\\"b\""));
+    }
+
+    #[test]
+    fn escaped_quote_leaves_a_truly_open_string_incomplete() {
+        assert!(!is_complete("\"a\\\"b"));
+    }
+
+    #[test]
+    fn brackets_inside_a_string_are_not_counted() {
+        assert!(is_complete("\"(unbalanced\""));
+    }
+
+    #[test]
+    fn escaped_backslash_then_quote_still_closes_the_string() {
+        // "a\\" — an escaped backslash, then the closing quote is real.
+        assert!(is_complete("\"a\\\\\""));
     }
 }
