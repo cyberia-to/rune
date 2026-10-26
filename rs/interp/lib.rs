@@ -35,10 +35,12 @@
 //! (not an atom opcode prefix), eval both sides against subject and return
 //! [result_f1, result_f2].  This is the "auto-cons" / distribute pattern.
 
+pub mod codec;
 pub mod event;
+pub mod machine;
 
-use rune_ast::Noun;
 use cyber_hemera as hemera;
+use rune_ast::Noun;
 
 /// Goldilocks prime: 2^64 - 2^32 + 1
 const GOLDILOCKS_PRIME: u64 = 0xFFFF_FFFF_0000_0001u64;
@@ -89,7 +91,35 @@ pub fn eval(subject: &Noun, formula: &Noun) -> Result<Noun, InterpError> {
 /// (args evaluated, `~caps` read from axis 30, result spliced at the subject
 /// head for the continuation). Non-act opcode-16 tags remain hints (the M5
 /// passthrough: evaluate the body).
-pub fn eval_with_host(subject: &Noun, formula: &Noun, host: &mut dyn Host) -> Result<Noun, InterpError> {
+pub fn eval_with_host(
+    subject: &Noun,
+    formula: &Noun,
+    host: &mut dyn Host,
+) -> Result<Noun, InterpError> {
+    let caps = axis(subject, 30).unwrap_or(Noun::Atom(0));
+    eval_with_authority(subject, formula, host, &caps)
+}
+
+/// Pin authority outside the mutable subject for the entire evaluation.
+pub fn eval_with_authority(
+    subject: &Noun,
+    formula: &Noun,
+    host: &mut dyn Host,
+    caps: &Noun,
+) -> Result<Noun, InterpError> {
+    struct BoundHost<'a> {
+        host: &'a mut dyn Host,
+        caps: &'a Noun,
+    }
+    impl Host for BoundHost<'_> {
+        fn perform(&mut self, act: u64, args: &Noun, _: &Noun) -> Result<Noun, InterpError> {
+            self.host.perform(act, args, self.caps)
+        }
+    }
+    eval_inner(subject, formula, &mut BoundHost { host, caps })
+}
+
+fn eval_inner(subject: &Noun, formula: &Noun, host: &mut dyn Host) -> Result<Noun, InterpError> {
     let mut subj = subject.clone();
     let mut form = formula.clone();
 
@@ -97,13 +127,12 @@ pub fn eval_with_host(subject: &Noun, formula: &Noun, host: &mut dyn Host) -> Re
         match form {
             // Distribution rule: formula is a cell whose head is also a cell.
             Noun::Cell(ref fh, ref ft) if matches!(fh.as_ref(), Noun::Cell(..)) => {
-                let h = eval_with_host(&subj, fh, host)?;
-                let t = eval_with_host(&subj, ft, host)?;
+                let h = eval_inner(&subj, fh, host)?;
+                let t = eval_inner(&subj, ft, host)?;
                 return Ok(Noun::cell(h, t));
             }
 
             Noun::Cell(ref op, ref rest) => match op.as_ref() {
-
                 // 0 — axis: navigate the noun tree
                 Noun::Atom(0) => return eval_axis(&subj, rest),
 
@@ -113,8 +142,8 @@ pub fn eval_with_host(subject: &Noun, formula: &Noun, host: &mut dyn Host) -> Re
                 // 2 — compose
                 Noun::Atom(2) => {
                     let (a, b) = pair(rest)?;
-                    let new_subj = eval_with_host(&subj, &a, host)?;
-                    let new_form = eval_with_host(&subj, &b, host)?;
+                    let new_subj = eval_inner(&subj, &a, host)?;
+                    let new_form = eval_inner(&subj, &b, host)?;
                     subj = new_subj;
                     form = new_form;
                     continue;
@@ -123,8 +152,8 @@ pub fn eval_with_host(subject: &Noun, formula: &Noun, host: &mut dyn Host) -> Re
                 // 3 — cons
                 Noun::Atom(3) => {
                     let (a, b) = pair(rest)?;
-                    let ha = eval_with_host(&subj, &a, host)?;
-                    let ta = eval_with_host(&subj, &b, host)?;
+                    let ha = eval_inner(&subj, &a, host)?;
+                    let ta = eval_inner(&subj, &b, host)?;
                     return Ok(Noun::cell(ha, ta));
                 }
 
@@ -132,7 +161,7 @@ pub fn eval_with_host(subject: &Noun, formula: &Noun, host: &mut dyn Host) -> Re
                 Noun::Atom(4) => {
                     let (test_f, ynb) = pair(rest)?;
                     let (yes_f, no_f) = pair(&ynb)?;
-                    let test_val = eval_with_host(&subj, &test_f, host)?;
+                    let test_val = eval_inner(&subj, &test_f, host)?;
                     let test_n = atom_u64(&test_val, "nox-4 branch: test must be atom")?;
                     form = if test_n == 0 { yes_f } else { no_f };
                     continue;
@@ -171,8 +200,8 @@ pub fn eval_with_host(subject: &Noun, formula: &Noun, host: &mut dyn Host) -> Re
                 // 9 — eq
                 Noun::Atom(9) => {
                     let (a, b) = pair(rest)?;
-                    let ra = eval_with_host(&subj, &a, host)?;
-                    let rb = eval_with_host(&subj, &b, host)?;
+                    let ra = eval_inner(&subj, &a, host)?;
+                    let rb = eval_inner(&subj, &b, host)?;
                     return Ok(Noun::Atom(if ra == rb { 0 } else { 1 }));
                 }
 
@@ -216,7 +245,7 @@ pub fn eval_with_host(subject: &Noun, formula: &Noun, host: &mut dyn Host) -> Re
 
                 // 15 — hash
                 Noun::Atom(15) => {
-                    let r = eval_with_host(&subj, rest, host)?;
+                    let r = eval_inner(&subj, rest, host)?;
                     return Ok(Noun::Atom(hash_noun(&r)));
                 }
 
@@ -231,9 +260,9 @@ pub fn eval_with_host(subject: &Noun, formula: &Noun, host: &mut dyn Host) -> Re
                     let (tag_noun, arg_f) = pair(&meta)?;
                     if let Noun::Atom(t) = tag_noun {
                         if rune_ast::act::is_act(t) {
-                            let args = eval_with_host(&subj, &arg_f, host)?;
-                            let caps = axis(&subj, rune_ast::act::CAPS_AXIS)
-                                .unwrap_or(Noun::Atom(0));
+                            let args = eval_inner(&subj, &arg_f, host)?;
+                            let caps =
+                                axis(&subj, rune_ast::act::CAPS_AXIS).unwrap_or(Noun::Atom(0));
                             let result = host.perform(t, &args, &caps)?;
                             subj = Noun::cell(result, subj);
                             form = cont;
@@ -247,8 +276,8 @@ pub fn eval_with_host(subject: &Noun, formula: &Noun, host: &mut dyn Host) -> Re
                 // 17 — look: graph scry
                 Noun::Atom(17) => {
                     let (path_form, world_form) = pair(rest)?;
-                    let path  = eval_with_host(&subj, &path_form, host)?;
-                    let world = eval_with_host(&subj, &world_form, host)?;
+                    let path = eval_inner(&subj, &path_form, host)?;
+                    let world = eval_inner(&subj, &world_form, host)?;
                     return Ok(scry_world(&path, &world));
                 }
 
@@ -269,7 +298,7 @@ pub fn axis(noun: &Noun, addr: u64) -> Result<Noun, InterpError> {
     match addr {
         0 => match noun {
             Noun::Cell(..) => Ok(Noun::Atom(0)),
-            Noun::Atom(v)  => Ok(Noun::Atom(*v)),
+            Noun::Atom(v) => Ok(Noun::Atom(*v)),
         },
         1 => Ok(noun.clone()),
         2 => match noun {
@@ -293,12 +322,10 @@ pub fn axis(noun: &Noun, addr: u64) -> Result<Noun, InterpError> {
 fn scry_world(path: &Noun, world: &Noun) -> Noun {
     match world {
         Noun::Atom(_) => Noun::Atom(0),
-        Noun::Cell(entry, rest) => {
-            match entry.as_ref() {
-                Noun::Cell(key, val) if key.as_ref() == path => *val.clone(),
-                _ => scry_world(path, rest),
-            }
-        }
+        Noun::Cell(entry, rest) => match entry.as_ref() {
+            Noun::Cell(key, val) if key.as_ref() == path => *val.clone(),
+            _ => scry_world(path, rest),
+        },
     }
 }
 
@@ -321,8 +348,13 @@ fn pair(noun: &Noun) -> Result<(Noun, Noun), InterpError> {
 }
 
 /// Eval a sub-formula (through `host`) and extract the u64 atom value.
-fn eval_atom_h(subj: &Noun, formula: &Noun, host: &mut dyn Host, ctx: &str) -> Result<u64, InterpError> {
-    let r = eval_with_host(subj, formula, host)?;
+fn eval_atom_h(
+    subj: &Noun,
+    formula: &Noun,
+    host: &mut dyn Host,
+    ctx: &str,
+) -> Result<u64, InterpError> {
+    let r = eval_inner(subj, formula, host)?;
     atom_u64(&r, ctx)
 }
 
@@ -405,7 +437,9 @@ fn hash_noun_bytes(noun: &Noun) -> [u8; 32] {
 }
 
 fn err(msg: &str) -> InterpError {
-    InterpError { message: msg.to_string() }
+    InterpError {
+        message: msg.to_string(),
+    }
 }
 
 // ── unit tests ────────────────────────────────────────────────────────────────
@@ -414,8 +448,12 @@ fn err(msg: &str) -> InterpError {
 mod tests {
     use super::*;
 
-    fn a(n: u64) -> Noun { Noun::Atom(n) }
-    fn c(h: Noun, t: Noun) -> Noun { Noun::cell(h, t) }
+    fn a(n: u64) -> Noun {
+        Noun::Atom(n)
+    }
+    fn c(h: Noun, t: Noun) -> Noun {
+        Noun::cell(h, t)
+    }
 
     // ── pattern 0: axis ───────────────────────────────────────────────────────
 
@@ -456,7 +494,10 @@ mod tests {
         // s = [[[1 2] [3 4]] [[5 6] [7 8]]]
         // axis 14 binary = 1110 → strip leading 1 → bits 1,1,0 → tail,tail,head
         // tail(s) = [[5 6] [7 8]], tail(that) = [7 8], head(that) = 7
-        let s = c(c(c(a(1), a(2)), c(a(3), a(4))), c(c(a(5), a(6)), c(a(7), a(8))));
+        let s = c(
+            c(c(a(1), a(2)), c(a(3), a(4))),
+            c(c(a(5), a(6)), c(a(7), a(8))),
+        );
         assert_eq!(eval(&s, &c(a(0), a(14))).unwrap(), a(7));
     }
 
@@ -616,7 +657,9 @@ mod tests {
         // [8 [1 2]] → modular inverse of 2; 2 * inv(2) = 1 mod p
         let formula = c(a(8), c(a(1), a(2)));
         let result = eval(&a(0), &formula).unwrap();
-        let Noun::Atom(r) = result else { panic!("expected atom") };
+        let Noun::Atom(r) = result else {
+            panic!("expected atom")
+        };
         assert_eq!(mul_field(2, r), 1);
     }
 
@@ -880,7 +923,11 @@ mod tests {
 
     use rune_ast::act;
 
-    struct Recorder { acts: Vec<(u64, Noun)>, caps: Noun, reply: Noun }
+    struct Recorder {
+        acts: Vec<(u64, Noun)>,
+        caps: Noun,
+        reply: Noun,
+    }
     impl Host for Recorder {
         fn perform(&mut self, act: u64, args: &Noun, caps: &Noun) -> Result<Noun, InterpError> {
             self.acts.push((act, args.clone()));
@@ -896,19 +943,27 @@ mod tests {
 
     #[test]
     fn act_performs_and_splices_result() {
-        let mut h = Recorder { acts: vec![], caps: a(0), reply: a(55) };
+        let mut h = Recorder {
+            acts: vec![],
+            caps: a(0),
+            reply: a(55),
+        };
         let r = eval_with_host(&a(0), &emit_act(7), &mut h).unwrap();
         assert_eq!(h.acts.len(), 1);
         assert_eq!(h.acts[0].0, act::EMIT);
         assert_eq!(h.acts[0].1, a(7)); // args evaluated before perform
-        assert_eq!(r, a(55));          // host result spliced (axis 2) and returned
+        assert_eq!(r, a(55)); // host result spliced (axis 2) and returned
     }
 
     #[test]
     fn acts_compose_via_cons() {
         // [3 emit(1) emit(2)] — the cons performs BOTH acts (nesting-safe)
         let formula = c(a(3), c(emit_act(1), emit_act(2)));
-        let mut h = Recorder { acts: vec![], caps: a(0), reply: a(0) };
+        let mut h = Recorder {
+            acts: vec![],
+            caps: a(0),
+            reply: a(0),
+        };
         eval_with_host(&a(0), &formula, &mut h).unwrap();
         let args: Vec<Noun> = h.acts.iter().map(|(_, n)| n.clone()).collect();
         assert_eq!(args, vec![a(1), a(2)]);
@@ -918,7 +973,11 @@ mod tests {
     fn act_reads_caps_from_axis_30() {
         // subject = [s0 [s1 [s2 [caps X]]]] → axis 30 = caps = 123
         let subj = c(a(0), c(a(1), c(a(2), c(a(123), a(0)))));
-        let mut h = Recorder { acts: vec![], caps: a(0), reply: a(0) };
+        let mut h = Recorder {
+            acts: vec![],
+            caps: a(0),
+            reply: a(0),
+        };
         eval_with_host(&subj, &emit_act(7), &mut h).unwrap();
         assert_eq!(h.caps, a(123));
     }

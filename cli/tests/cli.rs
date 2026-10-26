@@ -57,7 +57,7 @@ fn eval_self_resolves_to_a_neuron() {
 
 #[test]
 fn eval_prysm_value_renders_as_chunk() {
-    // A program whose *value* is a renderable noun decodes to a tape chunk and
+    // A program whose *value* is a renderable noun decodes to a tade chunk and
     // renders as its text (no sigil noise; colour off because stdout is piped).
     let out = rune(&["eval", r#"text("hi")"#]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
