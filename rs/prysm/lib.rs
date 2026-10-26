@@ -60,23 +60,111 @@ fn text_of(n: &Noun) -> String {
     String::from_utf8_lossy(&noun_to_bytes(n)).into_owned()
 }
 
+fn row_cells(payload: &Noun) -> Vec<Chunk> {
+    let mut cells = Vec::new();
+    let mut cur = payload;
+    while let Noun::Cell(elem, rest) = cur {
+        cells.push(Chunk::text(&text_of(elem)));
+        cur = rest.as_ref();
+    }
+    cells
+}
+
+fn table_rows(payload: &Noun) -> Vec<Chunk> {
+    let mut first = true;
+    collect_table_rows(payload, &mut first)
+}
+
+fn collect_table_rows(payload: &Noun, first: &mut bool) -> Vec<Chunk> {
+    let mut out = Vec::new();
+    let mut cur = payload;
+    loop {
+        match cur {
+            Noun::Cell(elem, rest) => {
+                if let Noun::Cell(h, tail) = elem.as_ref() {
+                    if matches!(h.as_ref(), Noun::Atom(t) if *t == tag::LIST) {
+                        // query("table-body") lands here as a nested list.
+                        // first must survive the splice, or the first data
+                        // row becomes a second header — the garbage after
+                        // "when" (particle:hex leaking into the caption).
+                        out.extend(collect_table_rows(tail, first));
+                        cur = rest.as_ref();
+                        continue;
+                    }
+                    if matches!(h.as_ref(), Noun::Atom(t) if *t == tag::ROW) {
+                        let cells = row_cells(tail);
+                        let (sig, rend) = if *first {
+                            *first = false;
+                            (sigil::FAS, render::STRUCT)
+                        } else {
+                            (sigil::COL, render::STRUCT)
+                        };
+                        out.push(Chunk::new(sig, rend, encode_nested(&cells)));
+                    }
+                }
+                cur = rest.as_ref();
+            }
+            _ => break,
+        }
+    }
+    out
+}
+
 /// Decode a single prysm element noun `[tag payload]` into one [`Chunk`].
 /// Returns `None` if the noun is not a recognised element.
 pub fn noun_to_chunk(n: &Noun) -> Option<Chunk> {
-    let Noun::Cell(head, payload) = n else { return None };
-    let Noun::Atom(t) = head.as_ref() else { return None };
+    let Noun::Cell(head, payload) = n else {
+        return None;
+    };
+    let Noun::Atom(t) = head.as_ref() else {
+        return None;
+    };
     let chunk = match *t {
-        tag::TEXT  => Chunk::text(&text_of(payload)),
-        tag::ANNO  => Chunk::annotation(&text_of(payload)),
+        tag::TEXT => Chunk::text(&text_of(payload)),
+        tag::ANNO => Chunk::annotation(&text_of(payload)),
         tag::ERROR => Chunk::error(&text_of(payload)),
-        tag::LOG   => Chunk::new(sigil::DOT, render::LOG, Bytes::from(noun_to_bytes(payload))),
+        tag::LOG => Chunk::new(sigil::DOT, render::LOG, Bytes::from(noun_to_bytes(payload))),
         tag::BUTTON => {
             // payload = [label-tape target-tape]
-            let Noun::Cell(label, target) = payload.as_ref() else { return None };
-            let label_c  = Chunk::annotation(&text_of(label));   // (~, t)
-            let target_c = Chunk::text(&text_of(target));        // (#, t)
-            Chunk::new(sigil::ZAP, render::COMPONENT, encode_nested(&[label_c, target_c]))
+            let Noun::Cell(label, target) = payload.as_ref() else {
+                return None;
+            };
+            let label_c = Chunk::annotation(&text_of(label)); // (~, t)
+            let target_c = Chunk::text(&text_of(target)); // (#, t)
+            Chunk::new(
+                sigil::ZAP,
+                render::COMPONENT,
+                encode_nested(&[label_c, target_c]),
+            )
         }
+        tag::STAT => {
+            let Noun::Cell(value, caption) = payload.as_ref() else {
+                return None;
+            };
+            let value_c = Chunk::text(&text_of(value));
+            let cap_c = Chunk::annotation(&text_of(caption));
+            Chunk::new(
+                sigil::BUC,
+                render::COMPONENT,
+                encode_nested(&[value_c, cap_c]),
+            )
+        }
+        tag::ROW => {
+            let mut kids = Vec::new();
+            let mut cur = payload.as_ref();
+            while let Noun::Cell(elem, rest) = cur {
+                if let Some(c) = noun_to_chunk(elem) {
+                    kids.push(c);
+                }
+                cur = rest.as_ref();
+            }
+            Chunk::new(sigil::LUS, render::COMPONENT, encode_nested(&kids))
+        }
+        tag::TABLE => Chunk::new(
+            sigil::HAX,
+            render::TABLE,
+            encode_nested(&table_rows(payload)),
+        ),
         _ => return None,
     };
     Some(chunk)
@@ -92,6 +180,13 @@ pub fn noun_to_chunks(n: &Noun) -> Vec<Chunk> {
             let mut out = Vec::new();
             let mut cur = tail.as_ref();
             while let Noun::Cell(elem, rest) = cur {
+                if let Noun::Cell(h, _) = elem.as_ref() {
+                    if matches!(h.as_ref(), Noun::Atom(t) if *t == tag::LIST) {
+                        out.extend(noun_to_chunks(elem));
+                        cur = rest.as_ref();
+                        continue;
+                    }
+                }
                 if let Some(c) = noun_to_chunk(elem) {
                     out.push(c);
                 }
@@ -158,9 +253,15 @@ mod tests {
         // Inner: annotation(label) + text(target) — matches prysm action::spawn.
         let inner = tade::decode_nested(&c.payload);
         assert_eq!(inner.len(), 2);
-        assert_eq!((inner[0].sigil, inner[0].render), (sigil::SIG, render::TEXT));
+        assert_eq!(
+            (inner[0].sigil, inner[0].render),
+            (sigil::SIG, render::TEXT)
+        );
         assert_eq!(&inner[0].payload[..], b"ok");
-        assert_eq!((inner[1].sigil, inner[1].render), (sigil::HAX, render::TEXT));
+        assert_eq!(
+            (inner[1].sigil, inner[1].render),
+            (sigil::HAX, render::TEXT)
+        );
         assert_eq!(&inner[1].payload[..], b"@master");
     }
 
@@ -169,10 +270,7 @@ mod tests {
         // [LIST text("a") [error("b") 0]]
         let elems = Noun::cell(
             Noun::cell(Noun::Atom(tag::TEXT), tape("a")),
-            Noun::cell(
-                Noun::cell(Noun::Atom(tag::ERROR), tape("b")),
-                Noun::Atom(0),
-            ),
+            Noun::cell(Noun::cell(Noun::Atom(tag::ERROR), tape("b")), Noun::Atom(0)),
         );
         let n = Noun::cell(Noun::Atom(tag::LIST), elems);
         let chunks = noun_to_chunks(&n);
@@ -241,5 +339,73 @@ mod tests {
     #[test]
     fn noun_to_chunks_unrecognized_noun_yields_empty() {
         assert!(noun_to_chunks(&Noun::Atom(42)).is_empty());
+    }
+
+    #[test]
+    fn stat_element_is_buc_component() {
+        let n = Noun::cell(
+            Noun::Atom(tag::STAT),
+            Noun::cell(tape("12"), tape("particles")),
+        );
+        let c = noun_to_chunk(&n).unwrap();
+        assert_eq!((c.sigil, c.render), (sigil::BUC, render::COMPONENT));
+        let inner = tade::decode_nested(&c.payload);
+        assert_eq!(inner.len(), 2);
+        assert_eq!(&inner[0].payload[..], b"12");
+        assert_eq!(&inner[1].payload[..], b"particles");
+    }
+
+    #[test]
+    fn nested_list_splices_into_col() {
+        let inner = Noun::cell(Noun::cell(Noun::Atom(tag::TEXT), tape("x")), Noun::Atom(0));
+        let elems = Noun::cell(Noun::cell(Noun::Atom(tag::LIST), inner), Noun::Atom(0));
+        let n = Noun::cell(Noun::Atom(tag::LIST), elems);
+        let chunks = noun_to_chunks(&n);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(&chunks[0].payload[..], b"x");
+    }
+
+    #[test]
+    fn table_first_row_is_header() {
+        let header = Noun::cell(
+            Noun::Atom(tag::ROW),
+            Noun::cell(tape("name"), Noun::Atom(0)),
+        );
+        let n = Noun::cell(Noun::Atom(tag::TABLE), Noun::cell(header, Noun::Atom(0)));
+        let c = noun_to_chunk(&n).unwrap();
+        assert_eq!((c.sigil, c.render), (sigil::HAX, render::TABLE));
+        let rows = tade::decode_nested(&c.payload);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            (rows[0].sigil, rows[0].render),
+            (sigil::FAS, render::STRUCT)
+        );
+    }
+
+    #[test]
+    fn nested_body_list_does_not_mint_a_second_header() {
+        let header = Noun::cell(
+            Noun::Atom(tag::ROW),
+            Noun::cell(tape("when"), Noun::Atom(0)),
+        );
+        let data = Noun::cell(
+            Noun::Atom(tag::ROW),
+            Noun::cell(tape("particle:ff"), Noun::Atom(0)),
+        );
+        let body = Noun::cell(Noun::Atom(tag::LIST), Noun::cell(data, Noun::Atom(0)));
+        let n = Noun::cell(
+            Noun::Atom(tag::TABLE),
+            Noun::cell(header, Noun::cell(body, Noun::Atom(0))),
+        );
+        let rows = tade::decode_nested(&noun_to_chunk(&n).unwrap().payload);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            (rows[0].sigil, rows[0].render),
+            (sigil::FAS, render::STRUCT)
+        );
+        assert_eq!(
+            (rows[1].sigil, rows[1].render),
+            (sigil::COL, render::STRUCT)
+        );
     }
 }
