@@ -1,4 +1,6 @@
-# Claude Code Instructions
+# AGENTS.md — rune
+
+> the doctrine of the home is `~/cyber/AGENTS.md`; it applies here first. Claude Code receives both files at session start through `~/.config/cyber/agents-md.nu`; other agents read them in order.
 
 ## Git Workflow
 - **Commit by default.** After completing a change, commit it.
