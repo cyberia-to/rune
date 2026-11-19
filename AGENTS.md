@@ -1,4 +1,4 @@
-# Claude Code Instructions
+# rune — instructions for an agent in this repository
 
 ## Git Workflow
 - **Commit by default.** After completing a change, commit it.
@@ -37,7 +37,7 @@ rs/lower        rune-lower       Expr → Nox noun
 rs/interp       rune-interp      tree-walking Nox interpreter (instant start) + Host/acts
 rs/subject      rune-subject     subject model (~self ~now ~here ~world …)
 rs/mold         rune-mold        mold system (types as normalizing functions)
-rs/prysm        rune-prysm       rune↔prysm bridge (chunk-noun → tape::Chunk)
+rs/prysm        rune-prysm       rune↔prysm bridge (chunk-noun → tade::Chunk)
 rs/compile      rune-compile     compile tier — TierRouter, ArtifactCache (M6)
 cli             rune-cli         CLI binary `rune` (repl / run / eval / fmt / check)
 ```
