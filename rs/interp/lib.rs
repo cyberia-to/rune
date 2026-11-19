@@ -373,8 +373,11 @@ fn add_field(a: u64, b: u64) -> u64 {
     ((a as u128 + b as u128) % GOLDILOCKS_PRIME as u128) as u64
 }
 
+/// Reduce both operands before the borrow: an unreduced `b` (any atom above
+/// the prime) would otherwise underflow the u128 and panic in a debug build.
 fn sub_field(a: u64, b: u64) -> u64 {
-    ((a as u128 + GOLDILOCKS_PRIME as u128 - b as u128) % GOLDILOCKS_PRIME as u128) as u64
+    let p = GOLDILOCKS_PRIME as u128;
+    ((a as u128 % p + p - b as u128 % p) % p) as u64
 }
 
 fn mul_field(a: u64, b: u64) -> u64 {
@@ -608,6 +611,14 @@ mod tests {
         // 0 - 1 = p - 1 mod p
         let formula = c(a(6), c(c(a(1), a(0)), c(a(1), a(1))));
         assert_eq!(eval(&a(0), &formula).unwrap(), a(GOLDILOCKS_PRIME - 1));
+    }
+
+    #[test]
+    fn sub_reduces_operands_above_the_prime() {
+        // b above p: the unreduced borrow would underflow the u128 and panic.
+        let formula = c(a(6), c(c(a(1), a(0)), c(a(1), a(u64::MAX))));
+        let expected = GOLDILOCKS_PRIME - (u64::MAX % GOLDILOCKS_PRIME);
+        assert_eq!(eval(&a(0), &formula).unwrap(), a(expected));
     }
 
     // ── pattern 7: mul ────────────────────────────────────────────────────────

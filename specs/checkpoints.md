@@ -6,9 +6,9 @@ status: implementation
 # bounded interpreter checkpoints
 
 The ephemeral reactive gate driver is `event::run_events`. Its state/subject
-layout and trusted base authority are unchanged. `run_cell` is a deprecated 0.1
-forwarder scheduled for removal in 0.2; it defines no runtime identity. Durable
-prog/job recovery is owned by the neuron adapter through the bounded machine.
+layout and trusted base authority are unchanged; the 0.1 name `run_cell` is
+gone, and it defined no runtime identity. Durable prog/job recovery is owned
+by the neuron adapter through the bounded machine.
 
 The machine adapter is an explicit reduction stack with finite step, data-node,
 depth and frame limits. It evaluates the interpreter's opcodes 0–17. Its ABI pins
@@ -35,7 +35,12 @@ API binds host authority outside subject rewriting; run_events binds from its
 mounted base before constructing event/state subjects.
 
 Logical node/frame limits bound interpreter state; a reduction can temporarily
-copy a bounded operand. Physical process memory limits belong to body/placement.
+copy a bounded operand. The step budget and the frame count are charged per
+reduction step, as is the size of the single value that step produced; the sum
+over the whole machine state is charged at slice boundaries — construction,
+resume, checkpoint, restore and every entry to and exit from a slice — because
+summing it per step would cost more than the reduction it bounds.
+Physical process memory limits belong to body/placement.
 Callers requiring a hard physical ceiling use an enforced process boundary.
 
 Classic parsing consumes the whole program, applies arithmetic precedence, and

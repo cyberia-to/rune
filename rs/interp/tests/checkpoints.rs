@@ -68,6 +68,35 @@ fn every_slice_can_restore_without_changing_pure_results() {
     }
 }
 
+/// The node budget is only summed over the whole state at slice boundaries,
+/// so each produced value is charged on its own: a value over the budget must
+/// still be refused in the middle of a slice.
+#[test]
+fn the_node_budget_bites_inside_a_slice() {
+    let limits = Limits {
+        nodes: 24,
+        ..Limits::default()
+    };
+    // a 13-node subject, doubled to 27 nodes by `[3 [0 1] [0 1]]`
+    let subject = c(a(1), c(a(2), c(a(3), c(a(4), c(a(5), c(a(6), a(0)))))));
+    let formula = c(a(3), c(c(a(0), a(1)), c(a(0), a(1))));
+    let mut machine = Machine::new(subject, formula, limits).unwrap();
+    assert!(machine.run(100).is_err());
+}
+
+/// The machine's ABI pins the interpreter's arithmetic, including operands
+/// above the Goldilocks prime, which the unreduced borrow used to panic on.
+#[test]
+fn subtraction_above_the_prime_agrees_with_the_interpreter() {
+    let formula = c(a(6), c(quote(0), quote(u64::MAX)));
+    let expected = rune_interp::eval(&a(0), &formula).unwrap();
+    let mut machine = Machine::new(a(0), formula, Limits::default()).unwrap();
+    match machine.run(100).unwrap() {
+        Step::Done(actual) => assert_eq!(actual, expected),
+        other => panic!("pure formula did not complete: {other:?}"),
+    }
+}
+
 #[test]
 fn budget_cannot_reset_through_checkpoint_and_decode_is_bounded() {
     let limits = Limits {

@@ -63,19 +63,29 @@ impl Machine {
             used: 0,
             limits,
         };
-        machine.check()?;
+        machine.measure()?;
         Ok(machine)
     }
     pub fn used_steps(&self) -> u64 {
         self.used
     }
+    /// Reduce for at most `slice` steps.
+    ///
+    /// The whole-state node sum is measured at the slice boundaries — entry
+    /// and every exit — not after every step. `measure()` walks every noun of
+    /// every frame, so charging it per step would cost O(steps × state nodes)
+    /// and make the bound the cheapest denial of service inside the machine.
+    /// Per step the machine charges only the O(1) limits plus the one value
+    /// the step produced (`push_value`), which is work the step already did
+    /// and is what stops a cons loop from doubling its way out of the budget.
     pub fn run(&mut self, slice: u64) -> Result<Step, InterpError> {
-        self.check()?;
         if slice == 0 {
             return Err(err("empty runtime slice"));
         }
+        self.measure()?;
         for _ in 0..slice {
             if let Some(step) = self.boundary()? {
+                self.measure()?;
                 return Ok(step);
             }
             if self.used >= self.limits.steps {
@@ -86,7 +96,9 @@ impl Machine {
             self.execute(frame)?;
             self.check()?;
         }
-        Ok(self.boundary()?.unwrap_or(Step::Yield))
+        let step = self.boundary()?.unwrap_or(Step::Yield);
+        self.measure()?;
+        Ok(step)
     }
     fn boundary(&self) -> Result<Option<Step>, InterpError> {
         if let Some(wait) = &self.waiting {
@@ -118,12 +130,20 @@ impl Machine {
             .ok_or_else(|| err("machine is not awaiting input"))?;
         self.work
             .push(Frame::Eval(Noun::cell(value, wait.subject), wait.body));
-        self.check()
+        self.measure()
     }
     fn pop(&mut self) -> Result<Noun, InterpError> {
         self.values
             .pop()
             .ok_or_else(|| err("machine value underflow"))
+    }
+    /// Push a reduced value, charging its own size against the node and depth
+    /// budget. No single value may exceed the budget, so the state stays
+    /// bounded by frames × nodes between two slice boundaries.
+    fn push_value(&mut self, value: Noun) -> Result<(), InterpError> {
+        codec::measure(&value, self.limits.nodes, self.limits.depth)?;
+        self.values.push(value);
+        Ok(())
     }
     fn execute(&mut self, frame: Frame) -> Result<(), InterpError> {
         match frame {
@@ -143,18 +163,15 @@ impl Machine {
                 let left = self.pop()?;
                 match op {
                     2 => self.work.push(Frame::Eval(left, right)),
-                    3 => self.values.push(Noun::cell(left, right)),
+                    3 => self.push_value(Noun::cell(left, right))?,
                     9 => self.values.push(Noun::Atom(u64::from(left != right))),
-                    17 => self.values.push(crate::scry_world(&left, &right)),
+                    17 => self.push_value(crate::scry_world(&left, &right))?,
                     _ => {
                         let a = atom_u64(&left, "binary left")?;
                         let b = atom_u64(&right, "binary right")?;
                         let value = match op {
                             5 => crate::add_field(a, b),
-                            6 => crate::sub_field(
-                                a % crate::GOLDILOCKS_PRIME,
-                                b % crate::GOLDILOCKS_PRIME,
-                            ),
+                            6 => crate::sub_field(a, b),
                             7 => crate::mul_field(a, b),
                             10 => u64::from(a >= b),
                             11 => a ^ b,
@@ -198,10 +215,8 @@ impl Machine {
             atom_u64(&head, "opcode")?
         };
         match op {
-            0 => self
-                .values
-                .push(crate::axis(&subject, atom_u64(&rest, "axis")?)?),
-            1 => self.values.push(rest),
+            0 => self.push_value(crate::axis(&subject, atom_u64(&rest, "axis")?)?)?,
+            1 => self.push_value(rest)?,
             2 | 3 | 5 | 6 | 7 | 9 | 10 | 11 | 12 | 14 | 17 => {
                 let (a, b) = pair(&rest)?;
                 self.binary(op, subject, a, b);
@@ -232,6 +247,8 @@ impl Machine {
         self.work.push(Frame::Eval(subject.clone(), right));
         self.work.push(Frame::Eval(subject, left));
     }
+    /// The O(1) limits: the limit set itself, the step budget, the frame count.
+    /// Charged after every reduction step.
     fn check(&self) -> Result<(), InterpError> {
         if self.limits.nodes == 0
             || self.limits.nodes > 1_048_576
@@ -244,6 +261,13 @@ impl Machine {
         {
             return Err(err("machine resource limit"));
         }
+        Ok(())
+    }
+    /// The cheap limits plus the data-node and depth budget, which walks every
+    /// noun of the machine state. Charged at slice boundaries only — see
+    /// [`Machine::run`].
+    fn measure(&self) -> Result<(), InterpError> {
+        self.check()?;
         let mut used = 0usize;
         let mut count = |value: &Noun| -> Result<(), InterpError> {
             used = used

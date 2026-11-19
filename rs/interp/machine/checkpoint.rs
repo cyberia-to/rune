@@ -50,7 +50,7 @@ fn read_frame(value: Noun) -> Result<Frame, InterpError> {
 }
 impl Machine {
     pub fn checkpoint(&self) -> Result<Vec<u8>, InterpError> {
-        self.check()?;
+        self.measure()?;
         let wait = match &self.waiting {
             Some(w) => list([
                 a(w.tag),
@@ -130,7 +130,7 @@ impl Machine {
             used,
             limits,
         };
-        machine.check()?;
+        machine.measure()?;
         Ok(machine)
     }
 }
