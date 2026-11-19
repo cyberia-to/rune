@@ -60,11 +60,14 @@ fn text_of(n: &Noun) -> String {
     String::from_utf8_lossy(&noun_to_bytes(n)).into_owned()
 }
 
+/// The cells of a `ROW` payload. A cell is an element noun per the ABI
+/// (`[7 e1 [e2 … 0]]`), so decode it as one; a bare tape — what a literal
+/// `row("a", "b")` lowers to — falls back to its text.
 fn row_cells(payload: &Noun) -> Vec<Chunk> {
     let mut cells = Vec::new();
     let mut cur = payload;
     while let Noun::Cell(elem, rest) = cur {
-        cells.push(Chunk::text(&text_of(elem)));
+        cells.push(noun_to_chunk(elem).unwrap_or_else(|| Chunk::text(&text_of(elem))));
         cur = rest.as_ref();
     }
     cells
@@ -318,6 +321,40 @@ mod tests {
             (rows[0].sigil, rows[0].render),
             (sigil::FAS, render::STRUCT)
         );
+    }
+
+    #[test]
+    fn row_element_is_lus_component_with_every_cell() {
+        // [ROW [TEXT a] [[TEXT b] [[TEXT c] 0]]] — what `row(text…)` lowers to
+        let cell = |s: &str| Noun::cell(Noun::Atom(tag::TEXT), tape(s));
+        let payload = Noun::cell(
+            cell("a"),
+            Noun::cell(cell("b"), Noun::cell(cell("c"), Noun::Atom(0))),
+        );
+        let c = noun_to_chunk(&Noun::cell(Noun::Atom(tag::ROW), payload)).unwrap();
+        assert_eq!((c.sigil, c.render), (sigil::LUS, render::COMPONENT));
+        let cells = tade::decode_nested(&c.payload);
+        assert_eq!(cells.len(), 3);
+        assert_eq!(&cells[0].payload[..], b"a");
+        assert_eq!(&cells[2].payload[..], b"c");
+    }
+
+    #[test]
+    fn table_cells_decode_element_nouns_not_their_tag_byte() {
+        // A row of `[TEXT <tape>]` cells — reading the cell as a bare tape
+        // prefixed the text with the tag byte.
+        let row = Noun::cell(
+            Noun::Atom(tag::ROW),
+            Noun::cell(
+                Noun::cell(Noun::Atom(tag::TEXT), tape("when")),
+                Noun::Atom(0),
+            ),
+        );
+        let n = Noun::cell(Noun::Atom(tag::TABLE), Noun::cell(row, Noun::Atom(0)));
+        let rows = tade::decode_nested(&noun_to_chunk(&n).unwrap().payload);
+        let cells = tade::decode_nested(&rows[0].payload);
+        assert_eq!(cells.len(), 1);
+        assert_eq!(&cells[0].payload[..], b"when");
     }
 
     #[test]

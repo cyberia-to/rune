@@ -1,7 +1,7 @@
 # render prysm chunks
 
 A rune program renders UI by evaluating to a **chunk-noun**, which
-`rune-prysm` decodes into `tape::Chunk`s — the wire format prysm draws to wgpu,
+`rune-prysm` decodes into `tade::Chunk`s — the wire format prysm draws to wgpu,
 ansi, or html. `rune eval` shows the decoded chunks.
 
 All commands run from `rs/`.
@@ -16,6 +16,9 @@ All commands run from `rs/`.
 | `log("…")` | a log line | |
 | `button("label", "target")` | a button | |
 | `col(a, b, …)` | a column — one chunk per element | |
+| `stat("42", "runs")` | a census card — value and caption | `($ c)` |
+| `row(a, b, …)` | a horizontal row of elements | `(+ c)` |
+| `table(row(…), …)` | a table of rows, the first its header | `(# T)` |
 
 ## a single chunk
 

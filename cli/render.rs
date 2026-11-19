@@ -54,6 +54,25 @@ pub fn ansi_chunk(c: &Chunk, color: bool) -> String {
             paint(color, GRAY, &format!("• [{lvl}] {msg}"))
         }
 
+        // stat — `value  caption`, the caption dim
+        render::COMPONENT if c.sigil == sigil::BUC => {
+            let inner = decode_nested(&c.payload);
+            let value = inner.first().map(text_of).unwrap_or_default();
+            let caption = inner.get(1).map(text_of).unwrap_or_default();
+            if caption.is_empty() {
+                value
+            } else {
+                format!("{value}{}", paint(color, DIM, &format!("  {caption}")))
+            }
+        }
+
+        // row — every cell rendered in turn, side by side
+        render::COMPONENT if c.sigil == sigil::LUS => decode_nested(&c.payload)
+            .iter()
+            .map(|cell| ansi_chunk(cell, color))
+            .collect::<Vec<_>>()
+            .join("  "),
+
         // button / component — `[ label ] → target`
         render::COMPONENT => {
             let inner = decode_nested(&c.payload);
@@ -65,6 +84,27 @@ pub fn ansi_chunk(c: &Chunk, color: bool) -> String {
                 paint(color, GRAY, &format!(" → {target}")),
             )
         }
+
+        // one table row — cells side by side; the header row (sigil `/`) is dim
+        render::STRUCT => {
+            let cells = decode_nested(&c.payload)
+                .iter()
+                .map(|cell| ansi_chunk(cell, color))
+                .collect::<Vec<_>>()
+                .join("  ");
+            if c.sigil == sigil::FAS {
+                paint(color, DIM, &cells)
+            } else {
+                cells
+            }
+        }
+
+        // table — one row per line
+        render::TABLE => decode_nested(&c.payload)
+            .iter()
+            .map(|row| ansi_chunk(row, color))
+            .collect::<Vec<_>>()
+            .join("\n"),
 
         // anything else — show the payload as text
         _ => text_of(c),
