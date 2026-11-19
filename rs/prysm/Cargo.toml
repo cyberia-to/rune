@@ -8,7 +8,7 @@ name = "rune-prysm"
 version = "0.1.0"
 edition = "2021"
 license-file.workspace = true
-description = "rune ↔ prysm bridge — decode rune result nouns into tape chunks"
+description = "rune ↔ prysm bridge — decode rune result nouns into tade chunks"
 
 [lib]
 path = "lib.rs"

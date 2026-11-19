@@ -67,7 +67,7 @@ cybermark  →  rune inline  →  rune  →  trident  →  Rs
 | `rune-interp` | tree-walking Nox interpreter (instant start) |
 | `rune-subject` | subject model (`~self` `~now` `~here` `~world` …) |
 | `rune-mold` | mold system (types as normalizing functions) |
-| `rune-prysm` | rune↔prysm bridge — chunk-noun → `tape::Chunk` |
+| `rune-prysm` | rune↔prysm bridge — chunk-noun → `tade::Chunk` |
 | `rune-compile` | compile tier — `TierRouter`, `ArtifactCache` (M6) |
 | `rune` | CLI binary (`run` / `eval` / `fmt` / `check`) |
 

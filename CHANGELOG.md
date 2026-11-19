@@ -29,9 +29,9 @@ milestones M1–M10 toward the Kelvin freeze (see `PLAN.md`).
 - **Acts** — the pure/world boundary: opcode-16 act tags (`emit query link seal
   subscribe host`) are performed through a `Host` trait (`eval_with_host`); pure
   `eval` no-ops them via `DenyHost`. The seam the cyb ward plugs into (M5).
-- **Cell entrypoint** — `event::run_cell` reactive loop: a gate invoked per
+- **Cell entrypoint** — `event::run_events` reactive loop: a gate invoked per
   event, emitting as it runs, threading evolving state (M5).
-- **rune↔prysm bridge** (`rune-prysm`) — decodes a chunk-noun into `tape::Chunk`s,
+- **rune↔prysm bridge** (`rune-prysm`) — decodes a chunk-noun into `tade::Chunk`s,
   the exact wire format prysm renders. `rune eval` shows emitted/returned chunks.
 - **CLI** (`rune`) — a **REPL** (no-arg) built on reedline (the nushell line
   editor): persistent history, Ctrl-R search, tab-completion (builtins, acts,
