@@ -100,19 +100,6 @@ pub fn run_events(
     Ok(state)
 }
 
-/// Compatibility entry point from rune-interp 0.1; remove in 0.2.
-/// The gate is an event driver with state, without a separate subject identity.
-#[deprecated(since = "0.1.0", note = "use run_events; removed in 0.2")]
-pub fn run_cell(
-    base: &Noun,
-    gate: &Noun,
-    init_state: Noun,
-    host: &mut dyn Host,
-    source: &mut MockEventSource,
-) -> Result<Noun, InterpError> {
-    run_events(base, gate, init_state, host, source)
-}
-
 /// A mock event source for development and testing (queued nouns).
 pub struct MockEventSource {
     events: std::collections::VecDeque<Noun>,
