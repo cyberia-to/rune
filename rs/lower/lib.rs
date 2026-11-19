@@ -1196,6 +1196,151 @@ mod tests {
         assert_eq!(result, Noun::Atom(7));
     }
 
+    /// `let double = fn(x) { x * 2 }; double(…double(5))` with `n` nested
+    /// call sites, so the gate body is re-lowered `n` times.
+    fn nested_gate_calls(n: usize) -> Expr {
+        let mut call = Expr::Atom(5);
+        for _ in 0..n {
+            call = Expr::Call {
+                gate: Box::new(Expr::Sym("double".into())),
+                args: vec![call],
+            };
+        }
+        Expr::Let {
+            name: "double".into(),
+            mold: None,
+            value: Box::new(Expr::Gate {
+                sample: Box::new(Expr::Sym("param:x".into())),
+                body: Box::new(Expr::Call {
+                    gate: Box::new(Expr::Sym("mul".into())),
+                    args: vec![Expr::Sym("x".into()), Expr::Atom(2)],
+                }),
+            }),
+            body: Box::new(call),
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // prysm chunk-noun lowering
+    // ------------------------------------------------------------------
+
+    /// `text(s)` as an Expr.
+    fn text_call(s: &str) -> Expr {
+        Expr::Call {
+            gate: Box::new(sym("text")),
+            args: vec![Expr::Text(s.to_string())],
+        }
+    }
+
+    /// The `[TEXT <tape>]` element `text(s)` evaluates to.
+    fn text_elem(s: &str) -> Noun {
+        cell_noun(atom_noun(tag::TEXT), tape_noun(s))
+    }
+
+    /// `row(cells…)` as an Expr.
+    fn row_call(cells: &[&str]) -> Expr {
+        Expr::Call {
+            gate: Box::new(sym("row")),
+            args: cells.iter().map(|s| text_call(*s)).collect(),
+        }
+    }
+
+    /// A null-terminated element list noun.
+    fn list_noun(items: Vec<Noun>) -> Noun {
+        let mut n = atom_noun(0);
+        for item in items.into_iter().rev() {
+            n = cell_noun(item, n);
+        }
+        n
+    }
+
+    fn eval_chunk_noun(expr: Expr) -> Noun {
+        let f = lower(expr).unwrap();
+        rune_interp::eval(&Noun::Atom(0), &f).unwrap()
+    }
+
+    #[test]
+    fn lower_prysm_stat() {
+        // stat("42", "runs") → [STAT [<42> <runs>]]
+        let expr = Expr::Call {
+            gate: Box::new(sym("stat")),
+            args: vec![Expr::Text("42".into()), Expr::Text("runs".into())],
+        };
+        assert_eq!(
+            eval_chunk_noun(expr),
+            cell_noun(
+                atom_noun(tag::STAT),
+                cell_noun(tape_noun("42"), tape_noun("runs"))
+            )
+        );
+    }
+
+    #[test]
+    fn lower_prysm_stat_rejects_the_wrong_arity() {
+        let expr = Expr::Call {
+            gate: Box::new(sym("stat")),
+            args: vec![Expr::Text("42".into())],
+        };
+        assert!(lower(expr).is_err());
+    }
+
+    #[test]
+    fn lower_prysm_row() {
+        // row(text("a"), text("b")) → [ROW [TEXT a] [[TEXT b] 0]]
+        assert_eq!(
+            eval_chunk_noun(row_call(&["a", "b"])),
+            cell_noun(
+                atom_noun(tag::ROW),
+                list_noun(vec![text_elem("a"), text_elem("b")])
+            )
+        );
+    }
+
+    #[test]
+    fn lower_prysm_table() {
+        // table(row(text("h")), row(text("c"))) → [TABLE [ROW …] [[ROW …] 0]]
+        let expr = Expr::Call {
+            gate: Box::new(sym("table")),
+            args: vec![row_call(&["h"]), row_call(&["c"])],
+        };
+        let row_noun = |c: &str| cell_noun(atom_noun(tag::ROW), list_noun(vec![text_elem(c)]));
+        assert_eq!(
+            eval_chunk_noun(expr),
+            cell_noun(
+                atom_noun(tag::TABLE),
+                list_noun(vec![row_noun("h"), row_noun("c")])
+            )
+        );
+    }
+
+    /// The smallest expansion budget under which `expr` lowers.
+    fn minimum_budget(expr: &Expr) -> usize {
+        (1..10_000)
+            .find(|&b| lower_bounded(expr.clone(), b).is_ok())
+            .expect("the expression lowers under some budget")
+    }
+
+    #[test]
+    fn lower_bounded_charges_every_inlined_gate_body() {
+        // Each call site re-lowers the gate body, so three cost strictly more
+        // than one — and the budget that fits one refuses three, rather than
+        // wrapping the counter and inlining for ever.
+        let one = minimum_budget(&nested_gate_calls(1));
+        let three = minimum_budget(&nested_gate_calls(3));
+        assert!(three > one, "three inlined bodies cost {three}, one {one}");
+        assert!(lower_bounded(nested_gate_calls(3), one).is_err());
+    }
+
+    #[test]
+    fn lower_bounded_within_budget_matches_unbounded_lowering() {
+        let bounded = lower_bounded(nested_gate_calls(3), 10_000).unwrap();
+        assert_eq!(bounded, lower(nested_gate_calls(3)).unwrap());
+        assert_eq!(
+            rune_interp::eval(&Noun::Atom(0), &bounded).unwrap(),
+            Noun::Atom(40)
+        );
+    }
+
     #[test]
     fn lower_gt() {
         // gt(7, 3) → 0  (7 > 3 is true → 0 in Nox truth convention)

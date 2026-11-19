@@ -92,6 +92,44 @@ fn eval_col_yields_multiple_chunks() {
 }
 
 #[test]
+fn eval_stat_renders_value_and_caption() {
+    let out = rune(&["eval", r#"stat("42", "runs")"#]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("42"), "value is missing: {s}");
+    assert!(s.contains("runs"), "caption is missing: {s}");
+    assert!(!s.contains('→'), "stat rendered as a button: {s}");
+}
+
+#[test]
+fn eval_row_renders_every_cell() {
+    // The button branch kept only the first two cells — a row keeps all three.
+    let out = rune(&["eval", r#"row(text("a"), text("b"), text("c"))"#]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    for cell in ["a", "b", "c"] {
+        assert!(s.contains(cell), "cell {cell} is missing: {s}");
+    }
+    assert!(!s.contains('→'), "row rendered as a button: {s}");
+}
+
+#[test]
+fn eval_table_renders_one_line_per_row() {
+    let out = rune(&[
+        "eval",
+        r#"table(row(text("when"), text("what")), row(text("now"), text("this")))"#,
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    let lines: Vec<_> = s.lines().filter(|l| !l.is_empty()).collect();
+    assert_eq!(lines.len(), 2, "expected one line per row, got: {lines:?}");
+    assert!(lines[0].contains("when") && lines[0].contains("what"), "{s}");
+    assert!(lines[1].contains("now") && lines[1].contains("this"), "{s}");
+    // the encode_nested framing must not leak through from_utf8_lossy
+    assert!(!s.contains('\u{1f}'), "raw chunk framing leaked: {s:?}");
+}
+
+#[test]
 fn eval_pure_register_runs() {
     // `--pure` parses the sigil register and evaluates it.
     let out = rune(&["eval", "--pure", "(mul 6 7)"]);
